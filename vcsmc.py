@@ -38,11 +38,11 @@ class VCSLAMAgent():
         return [10,1]
 
     def sim_target(self):
-        return tf.random_normal(shape=(self.num_steps,self.observ_dim))    
-    
+        return tf.random_normal(shape=(self.num_steps,self.observ_dim))
+
     def sim_proposal(self, t, x_prev, observ, num_particles, proposal_params):
         """
-        Simulate one transition by drawing a conditional sample from the 
+        Simulate one transition by drawing a conditional sample from the
         proposal distribution: draw from every univariate marginal
         """
         return x_prev + tf.random_normal(shape=(num_particles,self.latent_dim),dtype=tf.float32)
@@ -62,7 +62,7 @@ class VCSLAMAgent():
         """
         # TODO: implement log of multi-dimensional state and landmark copula density
         # Need to split the tensor components into the state and land marks,
-        # transform with their CDFs and 
+        # transform with their CDFs and
         # evaluate on the copula, and take the log
         #s_curr_tilde = self.mv_state_cdf(s_curr,x_prev,observ)
 
@@ -82,7 +82,7 @@ class VCSLAMAgent():
         """
         num_particles = x_curr.get_shape().as_list()[0]
         return tf.zeros(shape=(num_particles),dtype=tf.float32)
-    
+
     def log_proposal_copula_s(self,t,x_curr,x_prev,observ):
         """
         Log probability from the state-component copula
@@ -113,7 +113,7 @@ class VCSLAMAgent():
         # TODO: unpack proposal params and distribute to the respective models
         return self.log_proposal_copula(t,x_curr,x_prev,observ) + \
                self.log_proposal_marginal(t,x_curr,x_prev,observ)
-    
+
     def log_target(self,t,x_curr,x_prev,observ):
         """
         Compute the log probability using the target distribution
@@ -123,7 +123,7 @@ class VCSLAMAgent():
 
     def log_weights(self,t,x_curr,x_prev,observ,proposal_params):
         """
-        Compute the log weights as the difference in 
+        Compute the log weights as the difference in
         log target probabitliy and log proposal probability
         """
         return self.log_target(t,x_curr,x_prev,observ) - \
@@ -131,7 +131,7 @@ class VCSLAMAgent():
 
 class VCSLAM():
     """
-    This class implements the VC-SLAM training procedure and 
+    This class implements the VC-SLAM training procedure and
     a sampling method for the learned proposal.
     """
     def __init__(self,
@@ -150,7 +150,7 @@ class VCSLAM():
         self.num_steps = vcs_agent.get_num_steps()
         # State dimensionality
         self.state_dim = vcs_agent.get_state_dim()
-        # Number of landmarks 
+        # Number of landmarks
         self.num_landmarks = vcs_agent.get_num_landmarks()
         # Dimensonality of landmark variables
         self.landmark_dim = vcs_agent.get_landmark_dim()
@@ -160,7 +160,7 @@ class VCSLAM():
         self.observ_dim = vcs_agent.get_observ_dim()
         # Observation sequence (num_steps,observ_dim) tensor
         self.observ = observ
-        # Number of trajectory samples 
+        # Number of trajectory samples
         self.num_particles = num_particles
 
         # Boolean flag to invoke adaptive resampling
@@ -177,14 +177,14 @@ class VCSLAM():
         self.lr_d = lr_d
         # Marginal model learning rate
         self.lr_m = lr_m
-        # Cached constant: the logarithm of the number of particles 
+        # Cached constant: the logarithm of the number of particles
         self.log_num_particles = tf.log(tf.to_float(self.num_particles))
 
     def resampling(self, log_weights):
         """
         Stratified resampling
         Args:
-            log_weights: log importance weights 
+            log_weights: log importance weights
         Returns:
             ancestors: A tensor of ancenstral indices (num_particles,1)
         """
@@ -196,21 +196,21 @@ class VCSLAM():
         ancestors = tf.stop_gradient(
             resampling_dist.sample(sample_shape=(self.num_particles)))
         return ancestors
-    
+
     def sample_traj(self, log_weights):
         """
         Draw index from the particle set
         Args:
-            log_weights: log importance weights 
+            log_weights: log importance weights
         Returns:
-            index: An ancenstral index 
+            index: An ancenstral index
         """
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         return resampling_dist.sample()
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
         """
-        Estimate the VSMC lower bound. Amenable to (biased) reparameterization 
+        Estimate the VSMC lower bound. Amenable to (biased) reparameterization
         gradients.
 
         Inputs:
@@ -250,7 +250,7 @@ class VCSLAM():
             x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, self.num_particles, proposal_params)
 
             # Weighting
-            # Get the log weights for the current timestep  
+            # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
             logw_tilde = vcs_agent.log_weights(t, x_curr, x_prev, self.observ, proposal_params)
             max_logw_tilde = tf.reduce_max(logw_tilde)
@@ -297,7 +297,7 @@ class VCSLAM():
             x_curr[t,:,:] = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params, model_params)
 
             # Weighting
-            # Get the log weights for the current timestep  
+            # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
             logw_tilde = vcs_obj.log_weights(t, x_curr[t,:,:], x_prev, self.observ, prop_params, model_params)
             max_logw_tilde = tf.math.reduce_max(logw_tilde)
@@ -334,7 +334,7 @@ class VCSLAM():
         learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=self.dependency_params)
         learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=self.marginal_params)
 
-        # Start the session 
+        # Start the session
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
 

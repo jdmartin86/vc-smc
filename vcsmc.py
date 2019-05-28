@@ -5,19 +5,28 @@ class VCSLAMAgent():
     """
     Implements an example agent for VC-SLAM
     """
-    def __init__(self):
-        # Number of time steps 
-        self.num_steps = 10
+    def __init__(self,
+                 num_steps=10,
+                 state_dim=3,
+                 num_landmarks=2,
+                 landmark_dim=2,
+                 latent_dim=None,
+                 observ_dim=2):
+        # Number of time steps
+        self.num_steps = num_steps
         # Latent state dimensionality (x,y,theta)
-        self.state_dim = 3 
+        self.state_dim = state_dim
         # Number of landmarks
-        self.num_landmarks = 2
+        self.num_landmarks = num_landmarks
         # Landmark dimensionality (x,y)
-        self.landmark_dim = 2
+        self.landmark_dim = landmark_dim
         # Latent variable dimensonality
-        self.latent_dim = self.num_steps * (self.state_dim + self.landmark_dim*self.num_landmarks)
+        if not latent_dim:
+            self.latent_dim = self.num_steps * (self.state_dim + self.landmark_dim*self.num_landmarks)
+        else:
+            self.latent_dim = latent_dim
         # Observation dimensionality (range,bearing)
-        self.observ_dim = 2
+        self.observ_dim = observ_dim
         # Proposal parameters
         self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
         # Target model parameters
@@ -367,7 +376,8 @@ class VCSLAM():
 
 # Instantiate the VC-SLAM agent, which includes a target and a proposal dist
 # TODO: Implement this class with the test problem we consider, along with associated methods
-vcs_agent = VCSLAMAgent()
+# vcs_agent = VCSLAMAgent()
+vcs_agent = VCSLAMAgent(num_steps=1, state_dim=1, num_landmarks=2, landmark_dim=1, latent_dim=3, observ_dim=1)
 
 # Simulate the system to obtain a sequence of observations
 observ = vcs_agent.sim_target()

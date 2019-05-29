@@ -51,6 +51,23 @@ def generate_data(model_params, T = 5, rs = npr.RandomState(0)):
 
     return x_true, y_true
 
+def sample_true(model_params, x_actual, T = 5, rs = npr.RandomState(0), n_samples = 20):
+    mu0, Sigma0, A, Q, C, R = model_params
+    Dx = mu0.shape[0]
+    Dy = R.shape[0]
+
+    x_true = np.zeros((T,n_samples,Dx))
+    y_true = np.zeros((T,n_samples,Dy))
+
+    for t in range(T):
+        if t > 0:
+            x_true[t,:,:] = rs.multivariate_normal(np.dot(A,x_actual[t-1,:]),Q,size=n_samples)
+        else:
+            x_true[0,:,:] = rs.multivariate_normal(mu0,Sigma0,size=n_samples)
+        y_true[t,:,:] = rs.multivariate_normal(np.dot(C,x_actual[t,:]),R,size=n_samples)
+
+    return x_true, y_true
+
 def log_marginal_likelihood(model_params, T, y_true):
     mu0, Sigma0, A, Q, C, R = model_params
     Dx = mu0.shape[0]
@@ -137,7 +154,7 @@ class lgss_smc:
 
 if __name__ == '__main__':
     # Model hyper-parameters
-    T = 10
+    T = 2
     Dx = 1
     Dy = 1
     alpha = 0.42
@@ -196,12 +213,11 @@ if __name__ == '__main__':
                             num_iters=num_epochs, callback=print_perf)
     opt_model_params, opt_prop_params = optimized_params
     final_x_samples = sim_q(opt_prop_params, opt_model_params, y_true, lgss_smc_obj, seed)
-    mean, cov = [0, 2], [(1, .5), (.5, 1)]
-    test_x, test_y = np.random.multivariate_normal(mean, cov, size=50).T
+    x_true_samples, y_true_samples = sample_true(model_params, x_true, T, data_seed, n_samples=100)
     print(final_x_samples.ravel().shape)
-    print(test_x.shape)
+    print("True X shape", x_true_samples.shape)
     fig, ax = plt.subplots()
-    sbs.kdeplot(x_true.ravel(), legend=True, ax=ax, color='red')
+    sbs.kdeplot(x_true_samples.ravel(), legend=True, ax=ax, color='red')
     sbs.kdeplot(final_x_samples.ravel(), legend=True, ax=ax, color='blue')
     plt.show()
 

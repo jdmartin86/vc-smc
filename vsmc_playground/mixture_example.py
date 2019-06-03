@@ -46,8 +46,8 @@ def generate_data(model_params, T = 5, rs = npr.RandomState(0)):
     y_true = np.zeros((T,Dy))
 
     for t in range(T):
-        y_true[t] = rs.choice(a=[0.0, 1.0], p=y_probs)
-        x_true[t,:] = rs.multivariate_normal(y_true[t],Q)
+        y_true[t] = rs.choice(a=[0.0, 2.0], p=y_probs)
+        x_true[t,:] = rs.multivariate_normal(y_true[t],0.1*Q)
         # y_true[t,:] = rs.multivariate_normal(np.dot(C,x_true[t,:]),R)
 
     return x_true, y_true
@@ -114,26 +114,33 @@ class lgss_smc:
         Prec = np.linalg.inv(Sigma)
         return log_norm - 0.5*np.sum((x-mu)*np.dot(Prec,(x-mu).T).T,axis=1)
 
+    def log_mixture(self, x, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
+        dim = Sigma.shape[0]
+        Prec = np.linalg.inv(Sigma)
+        det = np.linalg.det(Sigma)
+        norm1 = (1.0/np.sqrt(dim*2.*np.pi*det))
+        norm2 = (1.0/np.sqrt(dim*2.*np.pi*det))
+        return np.log(p1*norm1*np.exp(-0.5*np.sum((x-mu1)*np.dot(Prec, (x-mu1).T).T, axis=1)) +
+                      p2*norm2*np.exp(-0.5*np.sum((x-mu2)*np.dot(Prec, (x-mu2).T).T, axis=1)))
+
+
     def log_prop(self, t, Xc, Xp, y, prop_params, model_params):
         mu0, Sigma0, A, Q, C, R = model_params
         mut, lint, log_s2t = prop_params[t]
         s2t = np.exp(log_s2t)
 
-        if t > 0:
-            mu = mut + np.dot(A, Xp.T).T*lint
-        else:
-            mu = mut + lint*mu0
+        # if t > 0:
+        #     mu = mut + np.dot(A, Xp.T).T*lint
+        # else:
+        mu = mut + lint*mu0
 
         return self.log_normal(Xc, mu, np.diag(s2t))
 
     def log_target(self, t, Xc, Xp, y, prop_params, model_params):
         mu0, Sigma0, A, Q, C, R = model_params
-        if t > 0:
-            logF = self.log_normal(Xc,np.dot(A,Xp.T).T, Q)
-        else:
-            logF = self.log_normal(Xc, mu0, Sigma0)
-        logG = self.log_normal(np.dot(C,Xc.T).T, y[t], R)
-        return logF + logG
+        logF = self.log_mixture(Xc, 0.1*Q)
+        # logF = self.log_normal(Xc, y[t], 0.1*Q)
+        return logF
 
     # These following 2 are the only ones needed by variational-smc.py
     def log_weights(self, t, Xc, Xp, y, prop_params, model_params):
@@ -154,7 +161,7 @@ class lgss_smc:
 
 if __name__ == '__main__':
     # Model hyper-parameters
-    T = 10
+    T = 20
     Dx = 1
     Dy = 1
     alpha = 0.42
@@ -162,11 +169,14 @@ if __name__ == '__main__':
     obs = 'sparse'
 
     # Training parameters
-    param_scale = 0.5
-    num_epochs = 1000
-    step_size = 0.001
+    # param_scale = 0.5
+    param_scale = 0.1
+    num_epochs = 400
+    step_size = 0.0001
+    # step_size = 0.001
 
-    N = 10
+
+    N = 20
 
     data_seed = npr.RandomState(0)
     model_params = init_model_params(Dx, Dy, alpha, r, obs, data_seed)

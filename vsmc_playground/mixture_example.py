@@ -45,6 +45,8 @@ def generate_data(model_params, T = 5, rs = npr.RandomState(0)):
     x_true = np.zeros((T,Dx))
     y_true = np.zeros((T,Dy))
 
+    # x_true[]
+
     for t in range(T):
         y_true[t] = rs.choice(a=[0.0, 2.0], p=y_probs)
         x_true[t,:] = rs.multivariate_normal(y_true[t],0.1*Q)
@@ -132,13 +134,15 @@ class lgss_smc:
         # if t > 0:
         #     mu = mut + np.dot(A, Xp.T).T*lint
         # else:
-        mu = mut + lint*mu0
+        # mu = mut + lint*mu0
+        mu = mu0
 
         return self.log_normal(Xc, mu, np.diag(s2t))
 
     def log_target(self, t, Xc, Xp, y, prop_params, model_params):
         mu0, Sigma0, A, Q, C, R = model_params
         logF = self.log_mixture(Xc, 0.1*Q)
+        # logF = self.log_normal(Xc, y[t], 0.1*Q)
         # logF = self.log_normal(Xc, y[t], 0.1*Q)
         return logF
 
@@ -161,7 +165,7 @@ class lgss_smc:
 
 if __name__ == '__main__':
     # Model hyper-parameters
-    T = 20
+    T = 1
     Dx = 1
     Dy = 1
     alpha = 0.42
@@ -169,11 +173,10 @@ if __name__ == '__main__':
     obs = 'sparse'
 
     # Training parameters
-    # param_scale = 0.5
-    param_scale = 0.1
-    num_epochs = 400
-    step_size = 0.0001
-    # step_size = 0.001
+    param_scale = 0.5
+    # param_scale = 0.1
+    num_epochs = 100
+    step_size = 0.001
 
 
     N = 20

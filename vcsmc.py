@@ -268,7 +268,7 @@ class VCSLAM():
             # Temporarily switched self.log_num_particles to its definition
             # i.e. tf.log(tf.to_float(self.num_particles))
             # This fixed a graph error
-            logZ += tf.reduce_logsumexp(logw_tilde_adj) -tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
+            logZ += tf.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles

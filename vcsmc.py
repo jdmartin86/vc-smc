@@ -236,7 +236,7 @@ class VCSLAM():
 
         # Unnormalized particle weights
         logw_tilde = tf.zeros(dtype=tf.float32,shape=(self.num_particles))
-        logZ   = 0.0
+        logZ = tf.zeros(dtype=tf.float32,shape=(1))
 
         # For effective sample size (ESS) calculations
         # TODO: implement after testing regular resampling (04/22)
@@ -264,7 +264,11 @@ class VCSLAM():
             logw_tilde = vcs_agent.log_weights(t, x_curr, x_prev, self.observ, proposal_params)
             max_logw_tilde = tf.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
-            logZ += tf.reduce_logsumexp(logw_tilde_adj) - self.log_num_particles + max_logw_tilde
+
+            # Temporarily switched self.log_num_particles to its definition
+            # i.e. tf.log(tf.to_float(self.num_particles))
+            # This fixed a graph error
+            logZ += tf.reduce_logsumexp(logw_tilde_adj) -tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
@@ -340,8 +344,8 @@ class VCSLAM():
         # Compute losses and define the learning procedures
         loss = self.vsmc_lower_bound(vcs_agent,proposal_params)
 
-        learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=self.dependency_params)
-        learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=self.marginal_params)
+        learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
+        learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
 
         # Start the session
         sess = tf.Session()

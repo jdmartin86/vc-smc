@@ -6,6 +6,7 @@ import autograd.numpy.random as npr
 from autograd import grad
 from autograd.misc.optimizers import adam
 from variational_smc import *
+from scipy.stats import norm
 import matplotlib.pyplot as plt
 import seaborn as sbs
 
@@ -45,14 +46,26 @@ def generate_data(model_params, T = 5, rs = npr.RandomState(0)):
     x_true = np.zeros((T,Dx))
     y_true = np.zeros((T,Dy))
 
+    for t in range(T):
+        x_true[t,:] = rs.multivariate_normal(0.5*np.ones(Dx), Q)
+        mean_choice = rs.choice(a=[0.0, 2.0], p=y_probs)
+        y_true[t,:] = rs.multivariate_normal(x_true[t,:]-mean_choice, 0.1*Q)
+
     # x_true[]
 
-    for t in range(T):
-        y_true[t] = rs.choice(a=[0.0, 2.0], p=y_probs)
-        x_true[t,:] = rs.multivariate_normal(y_true[t],0.1*Q)
+    # for t in range(T):
+    #     y_true[t] = rs.choice(a=[0.0, 2.0], p=y_probs)
+    #     x_true[t,:] = rs.multivariate_normal(y_true[t],0.1*Q)
         # y_true[t,:] = rs.multivariate_normal(np.dot(C,x_true[t,:]),R)
 
     return x_true, y_true
+
+def compute_true_prob(model_params, x_query, T):
+    mu0, Sigma0, A, Q, C, R = model_params
+    Dx = mu0.shape[0]
+    Dy = 1
+    y_probs = [0.7, 0.3]
+    return 0.7*norm.pdf((x_query-0.0)/(0.1*np.sqrt(Q))) + 0.3*norm.pdf((x_query-2.0)/(0.1*np.sqrt(Q)))
 
 def sample_true(model_params, x_actual, T = 5, rs = npr.RandomState(0), n_samples = 20):
     mu0, Sigma0, A, Q, C, R = model_params
@@ -116,15 +129,14 @@ class lgss_smc:
         Prec = np.linalg.inv(Sigma)
         return log_norm - 0.5*np.sum((x-mu)*np.dot(Prec,(x-mu).T).T,axis=1)
 
-    def log_mixture(self, x, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
+    def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
         dim = Sigma.shape[0]
         Prec = np.linalg.inv(Sigma)
         det = np.linalg.det(Sigma)
         norm1 = (1.0/np.sqrt(dim*2.*np.pi*det))
         norm2 = (1.0/np.sqrt(dim*2.*np.pi*det))
-        return np.log(p1*norm1*np.exp(-0.5*np.sum((x-mu1)*np.dot(Prec, (x-mu1).T).T, axis=1)) +
-                      p2*norm2*np.exp(-0.5*np.sum((x-mu2)*np.dot(Prec, (x-mu2).T).T, axis=1)))
-
+        return np.log(p1*np.exp(self.log_normal(x, mu1, Sigma)) +
+                      p2*np.exp(self.log_normal(x, mu2, Sigma)))
 
     def log_prop(self, t, Xc, Xp, y, prop_params, model_params):
         mu0, Sigma0, A, Q, C, R = model_params
@@ -135,16 +147,20 @@ class lgss_smc:
         #     mu = mut + np.dot(A, Xp.T).T*lint
         # else:
         # mu = mut + lint*mu0
-        mu = mu0
+        mu = np.zeros(mu0.shape[0])
 
         return self.log_normal(Xc, mu, np.diag(s2t))
 
     def log_target(self, t, Xc, Xp, y, prop_params, model_params):
         mu0, Sigma0, A, Q, C, R = model_params
-        logF = self.log_mixture(Xc, 0.1*Q)
+        # print("Xc shape", Xc.shape)
+        logF = self.log_normal(Xc, 0.0*np.ones(mu0.shape[0]), Q)
+        logG = self.log_mixture(Xc, y, 0.1*Q)
+
         # logF = self.log_normal(Xc, y[t], 0.1*Q)
         # logF = self.log_normal(Xc, y[t], 0.1*Q)
-        return logF
+
+        return logG
 
     # These following 2 are the only ones needed by variational-smc.py
     def log_weights(self, t, Xc, Xp, y, prop_params, model_params):
@@ -160,12 +176,15 @@ class lgss_smc:
             mu = mut + np.dot(A, Xp.T).T*lint
         else:
             mu = mut + lint*mu0
+        mu = np.zeros(mu0.shape[0])
         return mu + rs.randn(*Xp.shape)*np.sqrt(s2t)
 
 
 if __name__ == '__main__':
     # Model hyper-parameters
+    # T = 1 is correct for this example
     T = 1
+    # T = 10
     Dx = 1
     Dy = 1
     alpha = 0.42
@@ -175,11 +194,11 @@ if __name__ == '__main__':
     # Training parameters
     param_scale = 0.5
     # param_scale = 0.1
-    num_epochs = 100
-    step_size = 0.001
+    num_epochs = 1000
+    step_size = 0.01
 
-
-    N = 20
+    # Number of particles (I think?)
+    N = 10000
 
     data_seed = npr.RandomState(0)
     model_params = init_model_params(Dx, Dy, alpha, r, obs, data_seed)
@@ -225,12 +244,20 @@ if __name__ == '__main__':
     optimized_params = adam(objective_grad, combined_init_params, step_size=step_size,
                             num_iters=num_epochs, callback=print_perf)
     opt_model_params, opt_prop_params = optimized_params
-    final_x_samples = sim_q(opt_prop_params, opt_model_params, y_true, lgss_smc_obj, seed)
+    final_x_samples = np.array([sim_q(opt_prop_params, opt_model_params, y_true, lgss_smc_obj, seed) for i in range(1000)])
+    print("Final x samples shape", final_x_samples.shape)
     x_true_samples, y_true_samples = sample_true(model_params, x_true, T, data_seed, n_samples=100)
     print(final_x_samples.ravel().shape)
     print("True X shape", x_true_samples.shape)
     fig, ax = plt.subplots()
-    sbs.kdeplot(x_true_samples.ravel(), legend=True, ax=ax, color='red')
-    sbs.kdeplot(final_x_samples.ravel(), legend=True, ax=ax, color='blue')
+    # sbs.kdeplot(x_true_samples.ravel(), legend=True, ax=ax, color='red')
+    query_points = np.linspace(-2.0, 4.0, 400)
+    print("QP shape", query_points.shape)
+    query_values = np.array([np.exp(lgss_smc_obj.log_mixture(xi, y_true[0], 0.1*np.eye(1))) for xi in query_points]).ravel()
+    target_values = np.array([np.exp(lgss_smc_obj.log_target(1, np.array([[xi]]), xi, y_true[0], None, model_params)) for xi in query_points]).ravel()
+    print("QV shape", query_values.shape)
+    plt.plot(query_points, query_values, color='red')
+    # plt.plot(query_points, target_values, color='green')
+    sbs.distplot(final_x_samples.ravel(),  ax=ax, color='blue')
     plt.show()
 

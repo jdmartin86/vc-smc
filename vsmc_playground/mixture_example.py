@@ -1,5 +1,6 @@
 import sys
 sys.path.append('./')
+import timeit
 
 import autograd.numpy as np
 import autograd.numpy.random as npr
@@ -194,11 +195,11 @@ if __name__ == '__main__':
     # Training parameters
     param_scale = 0.5
     # param_scale = 0.1
-    num_epochs = 1000
-    step_size = 0.01
+    num_epochs = 2
+    step_size = 0.001
 
     # Number of particles (I think?)
-    N = 10000
+    N = 100
 
     data_seed = npr.RandomState(0)
     model_params = init_model_params(Dx, Dy, alpha, r, obs, data_seed)
@@ -241,8 +242,11 @@ if __name__ == '__main__':
             print(message)
 
     # SGD with adaptive step-size "adam"
+    start_time = timeit.default_timer()
     optimized_params = adam(objective_grad, combined_init_params, step_size=step_size,
                             num_iters=num_epochs, callback=print_perf)
+    elapsed = timeit.default_timer() - start_time
+    print("Elapsed time", elapsed)
     opt_model_params, opt_prop_params = optimized_params
     final_x_samples = np.array([sim_q(opt_prop_params, opt_model_params, y_true, lgss_smc_obj, seed) for i in range(1000)])
     print("Final x samples shape", final_x_samples.shape)

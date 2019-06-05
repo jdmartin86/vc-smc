@@ -43,6 +43,7 @@ class VCSLAMAgent():
     # TODO: decide on the structure of these params (model-specific)
     def get_dependency_param_shape(self):
         return [10,1]
+
     def get_marginal_param_shape(self):
         return [10,1]
 
@@ -246,6 +247,7 @@ class VCSLAM():
         for t in range(self.num_steps):
             # Resampling
             # Shape of x_prev (num_particles,latent_dim)
+            # Not doing adaptive resampling
             if t > 0:
                 ancestors = self.resampling(logw_tilde)
                 x_prev = tf.gather(x_curr,ancestors,axis=0)

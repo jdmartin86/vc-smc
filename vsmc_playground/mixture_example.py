@@ -148,7 +148,8 @@ class lgss_smc:
         #     mu = mut + np.dot(A, Xp.T).T*lint
         # else:
         # mu = mut + lint*mu0
-        mu = np.zeros(mu0.shape[0])
+        mu = mut + lint*mu0
+        # mu = np.zeros(mu0.shape[0])
 
         return self.log_normal(Xc, mu, np.diag(s2t))
 
@@ -177,7 +178,8 @@ class lgss_smc:
             mu = mut + np.dot(A, Xp.T).T*lint
         else:
             mu = mut + lint*mu0
-        mu = np.zeros(mu0.shape[0])
+        # mu = np.zeros(mu0.shape[0])
+        mu = mut + lint*mu0
         return mu + rs.randn(*Xp.shape)*np.sqrt(s2t)
 
 

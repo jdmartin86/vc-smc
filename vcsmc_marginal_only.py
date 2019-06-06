@@ -258,7 +258,8 @@ class VCSLAM():
             # This simulates one transition from the proposal distribution
             # Shape of x_curr (num_particles,latent_dim)
             # TODO: Revisit the arguments when you implement the class with the proposal and couplas
-            x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, self.num_particles, proposal_params)
+            x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, proposal_params)
+            # x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, self.num_particles, proposal_params)
 
             # Weighting
             # Get the log weights for the current timestep
@@ -276,7 +277,7 @@ class VCSLAM():
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
         return logZ
 
-    def sim_q(self, prop_params, model_params, y, smc_obj, rs, verbose=False):
+    def sim_q(self, prop_params, model_params, y, vcs_obj):
         """
         Simulates a single sample from the VSMC approximation.
         This returns the SLAM solution
@@ -309,7 +310,7 @@ class VCSLAM():
             # This simulates one transition from the proposal distribution
             # Shape of x_curr (num_particles,latent_dim)
             # TODO: Revisit the arguments when you implement the class with the proposal and couplas
-            x_curr[t,:,:] = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params, model_params)
+            x_curr[t,:,:] = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
 
             # Weighting
             # Get the log weights for the current timestep
@@ -330,6 +331,7 @@ class VCSLAM():
         """
         Creates the top-level computation graph for training
         """
+        print("Starting training")
         tf.reset_default_graph()
         initializer = tf.contrib.layers.xavier_initializer()
 
@@ -345,7 +347,9 @@ class VCSLAM():
                                             dtype=tf.float32,
                                             shape=vcs_agent.get_marginal_param_shape(),
                                             initializer=initializer)
+        print("Marginal params shape", marginal_params.shape)
         proposal_params = [dependency_params,marginal_params]
+        print("Length of proposal params", len(proposal_params))
         # Compute losses and define the learning procedures
         loss = self.vsmc_lower_bound(vcs_agent,proposal_params)
 
@@ -355,9 +359,12 @@ class VCSLAM():
         # Start the session
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
+        print("Original marginal_params:\n", marginal_params.eval(session=sess))
 
         # Top-level training loop
         # TODO: add logging for loss terms
+        iter_display = 100
+        print("    Iter    |    ELBO    ")
         for it in range(self.num_train_steps):
 
             # Train the dependency model
@@ -376,10 +383,13 @@ class VCSLAM():
                 print("NAN loss:", it)
                 break
 
-            mar_losses[it] = loss_curr
+            # mar_losses[it] = loss_curr
 
             if it % iter_display == 0:
-                print("Need to show plots")
+                message = "{:15}|{:20}".format(it, loss_curr)
+                print(message)
+        print("Final marginal params:\n", marginal_params.eval(session=sess))
+        return proposal_params
 
 
 if __name__ == '__main__':

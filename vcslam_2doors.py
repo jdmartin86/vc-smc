@@ -35,16 +35,27 @@ class TwoDoorsAgent(VCSLAMAgent):
     def get_dependency_param_shape(self):
         return 0
 
+    def get_marginal_param_shape(self):
+        return [3,1]
+
     def sim_target(self, num_samples):
         mean_choice = np.random.choice(a=[0.0, 2.0], p=[0.7, 0.3], size=num_samples)
         samples = [tf.random_normal(shape=(1,self.latent_dim), mean=mc, stddev=0.5) for mc in mean_choice]
         return tf.reshape(tf.convert_to_tensor(samples, dtype=tf.float32), [num_samples, self.latent_dim])
 
-    def sim_proposal(self, t, x_prev, observ, num_particles, proposal_params):
-        if t > 0:
-            return x_prev + tf.random_normal(shape=(num_particles, self.latent_dim), dtype=tf.float32)
-        else:
-            return tf.random_normal(shape=(num_particles, self.latent_dim))
+    def sim_proposal(self, t, x_prev, observ, proposal_params):
+        proposal_marg_params = proposal_params[1]
+        mut = proposal_marg_params[0]
+        lint = proposal_marg_params[1]
+        log_s2t = proposal_marg_params[2]
+        # mut, lint, log_s2t = proposal_marg_params
+        s2t = tf.exp(log_s2t)
+        # if t > 0:
+        #     return x_prev + tf.random_normal(shape=(num_particles, self.latent_dim), dtype=tf.float32)
+        # else:
+        #     return tf.random_normal(shape=(num_particles, self.latent_dim))
+        mu = mut + lint*0.0
+        return mu + tf.sqrt(s2t)
 
     def log_proposal_copula(self, t, x_curr, x_prev, observ):
         num_particles = x_curr.get_shape().as_list()[0]
@@ -83,15 +94,16 @@ if __name__ == '__main__':
     proposal_params = np.zeros(10)
     td_agent = TwoDoorsAgent()
     sess = tf.Session()
-    samps = td_agent.sim_proposal(0, None, None, num_particles, proposal_params)
-    samp_values = samps.eval(session=sess)
-    print(samp_values)
-    sbs.distplot(samp_values, color='red')
+    # samps = td_agent.sim_proposal(0, None, None, num_particles, proposal_params)
+    # samp_values = samps.eval(session=sess)
+    # print(samp_values)
+    # sbs.distplot(samp_values, color='red')
 
+    # uncomment to do plotting of log target
+    """
     target_samples = td_agent.sim_target(num_particles)
     target_sample_values = target_samples.eval(session=sess)
     print(target_sample_values)
-    print(samp_values.shape)
     print(target_sample_values.shape)
     sbs.distplot(target_sample_values, color='green')
     # plt.show()
@@ -102,10 +114,15 @@ if __name__ == '__main__':
     target_values = np.array([tf.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)).eval(session=sess) for xi in query_points]).ravel()
     plt.plot(query_points, target_values, color='blue')
     plt.show()
+    """
 
     observ = np.array([0.0])
     vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = 10)
-    vcs.train(vcs_agent = td_agent)
+    opt_proposal_params = vcs.train(vcs_agent = td_agent)
+
+    print(opt_proposal_params)
+
+    my_samples = vcs.sim_q(opt_proposal_params, None, observ, td_agent)
 
 
 

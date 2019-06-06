@@ -2,8 +2,9 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import seaborn as sbs
+from vcsmc_marginal_only import *
 
-class TwoDoorsAgent():
+class TwoDoorsAgent(VCSLAMAgent):
     def __init__(self,
                  num_steps=1,
                  state_dim=1,
@@ -31,6 +32,9 @@ class TwoDoorsAgent():
         # Target model params
         self.target_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
 
+    def get_dependency_param_shape(self):
+        return 0
+
     def sim_target(self, num_samples):
         mean_choice = np.random.choice(a=[0.0, 2.0], p=[0.7, 0.3], size=num_samples)
         samples = [tf.random_normal(shape=(1,self.latent_dim), mean=mc, stddev=0.5) for mc in mean_choice]
@@ -51,24 +55,28 @@ class TwoDoorsAgent():
         sign, logdet = np.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
         Prec = np.linalg.inv(Sigma)
-        ls_term = -0.5*tf.reduce_sum((x-mu)*Prec*(x-mu).T,1)
+        ls_term = -0.5*tf.reduce_sum((x-mu)*Prec*(x-mu),1)
         # return log_norm - 0.5*tf.reduce_sum((x-mu)*tf.tensordot(Prec,(x-mu).T,1).T)
-        return tf.convert_to_tensor(log_norm, dtype=tf.float64) + ls_term
+        return tf.convert_to_tensor(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
     def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
         return tf.log(p1*tf.exp(self.log_normal(x, mu1, Sigma)) +
                       p2*tf.exp(self.log_normal(x, mu2, Sigma)))
 
     def log_target(self, t, x_curr, x_prev, observ):
-        logG = self.log_mixture(x_curr, 0.0, 0.5*np.eye(1))
+        logG = self.log_mixture(x_curr, 0.0, 0.25*np.eye(1))
+        return logG
 
     def log_proposal_marginal(self, t, x_curr, x_prev, observ):
-        return self.log_normal(x, 0.0, 1.0)
+        return self.log_normal(x_curr, 0.0, np.eye(1))
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
         return self.log_proposal_copula(t, x_curr, x_prev, observ) + \
                self.log_proposal_marginal(t, x_curr, x_prev, observ)
 
+    def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
+        return self.log_target(t, x_curr, x_prev, observ) - \
+                self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
 
 if __name__ == '__main__':
     num_particles = 1000
@@ -90,8 +98,14 @@ if __name__ == '__main__':
 
     query_points = np.linspace(-2.0, 4.0, 50)
     print("QP shape", query_points.shape)
-    query_values = np.array([tf.exp(td_agent.log_mixture(xi, 0.0, 0.25*np.eye(1))).eval(session=sess) for xi in query_points]).ravel()
-    plt.plot(query_points, query_values, color='blue')
+    # query_values = np.array([tf.exp(td_agent.log_mixture(xi, 0.0, 0.25*np.eye(1))).eval(session=sess) for xi in query_points]).ravel()
+    target_values = np.array([tf.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)).eval(session=sess) for xi in query_points]).ravel()
+    plt.plot(query_points, target_values, color='blue')
     plt.show()
-    # target_values = np.array([tf.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)).eval(session=sess) for xi in query_points]).ravel()
+
+    observ = np.array([0.0])
+    vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = 10)
+    vcs.train(vcs_agent = td_agent)
+
+
 

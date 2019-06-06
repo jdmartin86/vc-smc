@@ -290,7 +290,7 @@ class VCSLAM():
 
         # Unnormalized particle weights
         logw_tilde = tf.zeros(dtype=tf.float32,shape=(self.num_particles))
-        logZ   = 0.0
+        logZ = tf.zeros(dtype=tf.float32,shape=(1))
 
         # For effective sample size (ESS) calculations
         # TODO: implement after testing regular resampling (04/22)
@@ -302,7 +302,7 @@ class VCSLAM():
             # Shape of x_prev (num_particles,latent_dim)
             if t > 0:
                 ancestors = self.resampling(logw_tilde)
-                x_prev = tf.gather(x_curr[t-1,:,:],ancestors,axis=0) #TODO: this indexing won't work - just for prototyping
+                x_prev = tf.gather(x_curr,ancestors,axis=0) #TODO: this indexing won't work - just for prototyping
             else:
                 x_prev = x_curr[0,:,:]
 
@@ -310,21 +310,27 @@ class VCSLAM():
             # This simulates one transition from the proposal distribution
             # Shape of x_curr (num_particles,latent_dim)
             # TODO: Revisit the arguments when you implement the class with the proposal and couplas
-            x_curr[t,:,:] = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
+            x_curr = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
 
             # Weighting
             # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
-            logw_tilde = vcs_obj.log_weights(t, x_curr[t,:,:], x_prev, self.observ, prop_params, model_params)
+            logw_tilde = vcs_obj.log_weights(t, x_curr, x_prev, self.observ, prop_params)
             max_logw_tilde = tf.math.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
-            logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - self.log_num_particles + max_logw_tilde
+            logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
+
+            # Not sure if this is correct at all - Kevin
+            # W = tf.exp(logw_tilde_adj)
+            # W /= tf.reduce_sum(W)
+            # logW = tf.log(W)
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
         # Sample from the empirical approximation
         B = self.sample_traj(logw_tilde)
+        # B = self.sample_traj(logW)
         return tf.gather(x_curr,B,axis=0)
 
     def train(self,vcs_agent):
@@ -389,7 +395,7 @@ class VCSLAM():
                 message = "{:15}|{:20}".format(it, loss_curr)
                 print(message)
         print("Final marginal params:\n", marginal_params.eval(session=sess))
-        return proposal_params
+        return proposal_params, sess
 
 
 if __name__ == '__main__':

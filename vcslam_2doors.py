@@ -93,7 +93,7 @@ if __name__ == '__main__':
     num_particles = 1000
     proposal_params = np.zeros(10)
     td_agent = TwoDoorsAgent()
-    sess = tf.Session()
+    # sess = tf.Session()
     # samps = td_agent.sim_proposal(0, None, None, num_particles, proposal_params)
     # samp_values = samps.eval(session=sess)
     # print(samp_values)
@@ -118,11 +118,13 @@ if __name__ == '__main__':
 
     observ = np.array([0.0])
     vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = 10)
-    opt_proposal_params = vcs.train(vcs_agent = td_agent)
+    opt_proposal_params, sess = vcs.train(vcs_agent = td_agent)
 
     print(opt_proposal_params)
 
-    my_samples = vcs.sim_q(opt_proposal_params, None, observ, td_agent)
+    num_samps = 50
+    my_samples = [vcs.sim_q(opt_proposal_params, None, observ, td_agent).eval(session=sess) for i in range(num_samps)]
+    print(my_samples)
 
 
 

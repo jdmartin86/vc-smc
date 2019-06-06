@@ -51,14 +51,16 @@ class TwoDoorsAgent():
         sign, logdet = np.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
         Prec = np.linalg.inv(Sigma)
-        return log_norm - 0.5*tf.reduce_sum((x-mu)*tf.tensordot(Prec,(x-mu).T,1).T)
+        ls_term = -0.5*tf.reduce_sum((x-mu)*Prec*(x-mu).T,1)
+        # return log_norm - 0.5*tf.reduce_sum((x-mu)*tf.tensordot(Prec,(x-mu).T,1).T)
+        return tf.convert_to_tensor(log_norm, dtype=tf.float64) + ls_term
 
     def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
         return tf.log(p1*tf.exp(self.log_normal(x, mu1, Sigma)) +
                       p2*tf.exp(self.log_normal(x, mu2, Sigma)))
 
     def log_target(self, t, x_curr, x_prev, observ):
-        logG = self.log_mixture(x_curr, 0.5)
+        logG = self.log_mixture(x_curr, 0.0, 0.5*np.eye(1))
 
     def log_proposal_marginal(self, t, x_curr, x_prev, observ):
         return self.log_normal(x, 0.0, 1.0)
@@ -76,7 +78,7 @@ if __name__ == '__main__':
     samps = td_agent.sim_proposal(0, None, None, num_particles, proposal_params)
     samp_values = samps.eval(session=sess)
     print(samp_values)
-    sbs.distplot(samp_values, color='blue')
+    sbs.distplot(samp_values, color='red')
 
     target_samples = td_agent.sim_target(num_particles)
     target_sample_values = target_samples.eval(session=sess)
@@ -84,9 +86,12 @@ if __name__ == '__main__':
     print(samp_values.shape)
     print(target_sample_values.shape)
     sbs.distplot(target_sample_values, color='green')
+    # plt.show()
 
-    query_points = np.linspace(-2.0, 4.0, 400)
+    query_points = np.linspace(-2.0, 4.0, 50)
     print("QP shape", query_points.shape)
-    query_values = np.array([np.exp(td_agent.log_mixture(xi, 0.0, 0.5*np.eye(1))) for xi in query_points]).ravel()
-    target_values = np.array([np.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)) for xi in query_points]).ravel()
+    query_values = np.array([tf.exp(td_agent.log_mixture(xi, 0.0, 0.25*np.eye(1))).eval(session=sess) for xi in query_points]).ravel()
+    plt.plot(query_points, query_values, color='blue')
+    plt.show()
+    # target_values = np.array([tf.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)).eval(session=sess) for xi in query_points]).ravel()
 

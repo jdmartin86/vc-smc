@@ -31,7 +31,6 @@ class TwoDoorsAgent(VCSLAMAgent):
         self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
         # Target model params
         self.target_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
-        self.num_particles = 10
 
     def get_dependency_param_shape(self):
         return 0
@@ -110,11 +109,12 @@ if __name__ == '__main__':
 
     print(sess.run(opt_proposal_params))
 
-    num_samps = 50
+    num_samps = 1
     my_vars = [vcs.sim_q(opt_proposal_params, None, observ, td_agent) for i in range(num_samps)]
     my_samples = sess.run(my_vars)
-    print(my_samples)
-    sbs.distplot(my_samples, color='blue')
+    print(my_samples[0])
+    # print(my_samples)
+    # sbs.distplot(my_samples, color='blue')
 
     # uncomment to do plotting of log target
     # target_samples = td_agent.sim_target(num_particles)
@@ -124,11 +124,12 @@ if __name__ == '__main__':
     # sbs.distplot(target_sample_values, color='green')
     # plt.show()
 
+    """
     query_points = np.linspace(-2.0, 4.0, 50)
     print("QP shape", query_points.shape)
     # query_values = np.array([tf.exp(td_agent.log_mixture(xi, 0.0, 0.25*np.eye(1))).eval(session=sess) for xi in query_points]).ravel()
     target_values = np.array([tf.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)).eval(session=sess) for xi in query_points]).ravel()
     plt.plot(query_points, target_values, color='red')
+    """
     # plt.show()
-    plt.show()
 

@@ -341,7 +341,8 @@ class VCSLAM():
         B = self.sample_traj(logw_tilde)
         print("B: ", B)
         # B = self.sample_traj(logW)
-        return tf.gather(x_curr,B,axis=0)
+        # tf.gather(x_curr,B,axis=0)
+        return x_curr, B
 
     def train(self,vcs_agent):
         """
@@ -395,8 +396,11 @@ class VCSLAM():
             # Train the marginal model
             _, loss_curr = sess.run([learn_marginal, loss])
 
+            print(loss_curr)
             if np.isnan(loss_curr):
                 print("NAN loss:", it)
+                # Break everything if the loss goes to NaN
+                return None
                 break
 
             # mar_losses[it] = loss_curr

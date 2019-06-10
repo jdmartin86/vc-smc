@@ -150,8 +150,10 @@ class lgss_smc:
         # mu = mut + lint*mu0
         mu = mut + lint*mu0
         # mu = np.zeros(mu0.shape[0])
+        log_prop = self.log_normal(Xc, mu, np.diag(s2t))
+        print("log prop shape: ", log_prop.shape)
 
-        return self.log_normal(Xc, mu, np.diag(s2t))
+        return log_prop
 
     def log_target(self, t, Xc, Xp, y, prop_params, model_params):
         mu0, Sigma0, A, Q, C, R = model_params
@@ -161,6 +163,7 @@ class lgss_smc:
 
         # logF = self.log_normal(Xc, y[t], 0.1*Q)
         # logF = self.log_normal(Xc, y[t], 0.1*Q)
+        print("log target shape: ", logG.shape)
 
         return logG
 
@@ -180,7 +183,10 @@ class lgss_smc:
             mu = mut + lint*mu0
         # mu = np.zeros(mu0.shape[0])
         mu = mut + lint*mu0
-        return mu + rs.randn(*Xp.shape)*np.sqrt(s2t)
+        # print("Mu shape: ", mu.shape)
+        sample = mu + rs.randn(*Xp.shape)*np.sqrt(s2t)
+        # print("Sim prop sample size", sample.shape)
+        return sample
 
 
 if __name__ == '__main__':

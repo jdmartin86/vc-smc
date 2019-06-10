@@ -1,3 +1,5 @@
+from __future__ import print_function
+import sys
 import numpy as np
 import tensorflow as tf
 
@@ -215,8 +217,11 @@ class VCSLAM():
         Returns:
             index: An ancenstral index
         """
+        print("shape of log weights? ", log_weights)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
-        return resampling_dist.sample()
+        print(log_weights)
+        samp = resampling_dist.sample()
+        return samp
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
         """
@@ -292,6 +297,8 @@ class VCSLAM():
         logw_tilde = tf.zeros(dtype=tf.float32,shape=(self.num_particles))
         logZ = tf.zeros(dtype=tf.float32,shape=(1))
 
+        X = tf.zeros(dtype=tf.float32, shape=(self.num_steps, self.num_particles, self.latent_dim))
+
         # For effective sample size (ESS) calculations
         # TODO: implement after testing regular resampling (04/22)
         #w      = tf.nn.softmax(logits=logW)
@@ -316,6 +323,7 @@ class VCSLAM():
             # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
             logw_tilde = vcs_obj.log_weights(t, x_curr, x_prev, self.observ, prop_params)
+            # print(logw_tilde)
             max_logw_tilde = tf.math.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
             logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
@@ -329,7 +337,9 @@ class VCSLAM():
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
         # Sample from the empirical approximation
+        print("LogW tilde: ", logw_tilde)
         B = self.sample_traj(logw_tilde)
+        print("B: ", B)
         # B = self.sample_traj(logW)
         return tf.gather(x_curr,B,axis=0)
 

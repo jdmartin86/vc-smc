@@ -69,7 +69,7 @@ class TwoDoorsAgent(VCSLAMAgent):
         sign, logdet = np.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
         Prec = np.linalg.inv(Sigma)
-        ls_term = -0.5*tf.reduce_sum((x-mu)*Prec*(x-mu),1)
+        ls_term = -0.5*tf.reduce_sum((x-mu)*Prec*(x-mu),0)
         # return log_norm - 0.5*tf.reduce_sum((x-mu)*tf.tensordot(Prec,(x-mu).T,1).T)
         return tf.convert_to_tensor(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
@@ -89,11 +89,15 @@ class TwoDoorsAgent(VCSLAMAgent):
                self.log_proposal_marginal(t, x_curr, x_prev, observ)
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
-        return self.log_target(t, x_curr, x_prev, observ) - \
-                self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
+        target_log = self.log_target(t, x_curr, x_prev, observ)
+        target_log = tf.debugging.check_numerics(target_log, "Target log error")
+        prop_log = self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
+        prop_log = tf.debugging.check_numerics(prop_log, "Proposal log error")
+        return target_log - prop_log
 
 if __name__ == '__main__':
-    num_particles = 1000
+    tf.random.set_random_seed(0)
+    num_particles = 100
     proposal_params = np.zeros(10)
     td_agent = TwoDoorsAgent()
     # sess = tf.Session()
@@ -104,17 +108,18 @@ if __name__ == '__main__':
 
 
     observ = np.array([0.0])
-    vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = 10)
+    vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = 10, num_train_steps=100, lr_m=0.001)
+    # tf.get_default_graph().finalize()
     opt_proposal_params, sess = vcs.train(vcs_agent = td_agent)
 
     print(sess.run(opt_proposal_params))
 
-    num_samps = 1
+    num_samps = 100
     my_vars = [vcs.sim_q(opt_proposal_params, None, observ, td_agent) for i in range(num_samps)]
     my_samples = sess.run(my_vars)
     print(my_samples[0])
     # print(my_samples)
-    # sbs.distplot(my_samples, color='blue')
+    sbs.distplot(my_samples, color='blue')
 
     # uncomment to do plotting of log target
     # target_samples = td_agent.sim_target(num_particles)
@@ -124,12 +129,11 @@ if __name__ == '__main__':
     # sbs.distplot(target_sample_values, color='green')
     # plt.show()
 
-    """
     query_points = np.linspace(-2.0, 4.0, 50)
     print("QP shape", query_points.shape)
     # query_values = np.array([tf.exp(td_agent.log_mixture(xi, 0.0, 0.25*np.eye(1))).eval(session=sess) for xi in query_points]).ravel()
-    target_values = np.array([tf.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)).eval(session=sess) for xi in query_points]).ravel()
+    target_vars = [tf.exp(td_agent.log_target(1, np.array([[xi]]), xi, observ=0.0)) for xi in query_points]
+    target_values = np.array(sess.run([target_vars])).ravel()
     plt.plot(query_points, target_values, color='red')
-    """
-    # plt.show()
+    plt.show()
 

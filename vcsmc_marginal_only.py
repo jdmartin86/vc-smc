@@ -217,9 +217,9 @@ class VCSLAM():
         Returns:
             index: An ancenstral index
         """
-        print("shape of log weights? ", log_weights)
+        # print("shape of log weights? ", log_weights)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
-        print(log_weights)
+        # print(log_weights)
         samp = resampling_dist.sample()
         return samp
 
@@ -270,13 +270,14 @@ class VCSLAM():
             # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
             logw_tilde = vcs_agent.log_weights(t, x_curr, x_prev, self.observ, proposal_params)
+            logw_tilde = tf.debugging.check_numerics(logw_tilde, "Error, ahhh!!!")
             max_logw_tilde = tf.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
 
             # Temporarily switched self.log_num_particles to its definition
             # i.e. tf.log(tf.to_float(self.num_particles))
             # This fixed a graph error
-            logZ += tf.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
+            logZ += max_logw_tilde + tf.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles))
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
@@ -329,20 +330,20 @@ class VCSLAM():
             logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
 
             # Not sure if this is correct at all - Kevin
-            # W = tf.exp(logw_tilde_adj)
-            # W /= tf.reduce_sum(W)
-            # logW = tf.log(W)
+            W = tf.exp(logw_tilde_adj)
+            W /= tf.reduce_sum(W)
+            logW = tf.log(W)
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
         # Sample from the empirical approximation
-        print("LogW tilde: ", logw_tilde)
+        # print("LogW tilde: ", logw_tilde)
         B = self.sample_traj(logw_tilde)
-        print("B: ", B)
         # B = self.sample_traj(logW)
-        # tf.gather(x_curr,B,axis=0)
-        return x_curr, B
+        # print("B: ", B)
+        return tf.gather(x_curr,B,axis=0)
+        # return x_curr, B
 
     def train(self,vcs_agent):
         """
@@ -396,7 +397,6 @@ class VCSLAM():
             # Train the marginal model
             _, loss_curr = sess.run([learn_marginal, loss])
 
-            print(loss_curr)
             if np.isnan(loss_curr):
                 print("NAN loss:", it)
                 # Break everything if the loss goes to NaN

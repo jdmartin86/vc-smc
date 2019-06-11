@@ -155,7 +155,8 @@ class VCSLAM():
                 lr_m = 0.0001,
                 adapt_resamp = False,
                 summary_writer=None,
-                summary_writing_frequency=500):
+                summary_writing_frequency=500,
+                rs=np.random.RandomState(0)):
         # VC-SLAM agent
         self.vcs_agent = vcs_agent
         # Number of time steps on the horizon
@@ -192,6 +193,8 @@ class VCSLAM():
         # Cached constant: the logarithm of the number of particles
         self.log_num_particles = tf.log(tf.to_float(self.num_particles))
 
+        self.rs = rs
+
     def resampling(self, log_weights):
         """
         Stratified resampling
@@ -206,7 +209,7 @@ class VCSLAM():
         # log_weights = tf.gather(self.logw,t,axis=1)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         ancestors = tf.stop_gradient(
-            resampling_dist.sample(sample_shape=(self.num_particles)))
+            resampling_dist.sample(sample_shape=(self.num_particles),seed=self.rs.randint(0,1234)))
         return ancestors
 
     def sample_traj(self, log_weights):
@@ -220,7 +223,7 @@ class VCSLAM():
         # print("shape of log weights? ", log_weights)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         # print(log_weights)
-        samp = resampling_dist.sample()
+        samp = resampling_dist.sample(seed=self.rs.randint(0,1234))
         return samp
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
@@ -351,7 +354,9 @@ class VCSLAM():
         """
         print("Starting training")
         tf.reset_default_graph()
-        initializer = tf.contrib.layers.xavier_initializer()
+        # initializer = tf.contrib.layers.xavier_initializer()
+        dependency_initializer = tf.contrib.layers.xavier_initializer()
+        marginal_initializer = tf.constant_initializer()
 
         # Initialize the parameters
         if vcs_agent.get_dependency_param_shape() == 0:
@@ -360,16 +365,16 @@ class VCSLAM():
             dependency_params = tf.get_variable( "theta",
                                                 dtype=tf.float32,
                                                 shape=vcs_agent.get_dependency_param_shape(),
-                                                initializer=initializer)
+                                                initializer=dependency_initializer)
         marginal_params   = tf.get_variable( "eta",
                                             dtype=tf.float32,
                                             shape=vcs_agent.get_marginal_param_shape(),
-                                            initializer=initializer)
+                                            initializer=marginal_initializer)
         print("Marginal params shape", marginal_params.shape)
         proposal_params = [dependency_params,marginal_params]
         print("Length of proposal params", len(proposal_params))
         # Compute losses and define the learning procedures
-        loss = self.vsmc_lower_bound(vcs_agent,proposal_params)
+        loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
 
         # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
         learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
@@ -406,7 +411,7 @@ class VCSLAM():
             # mar_losses[it] = loss_curr
 
             if it % iter_display == 0:
-                message = "{:15}|{:20}".format(it, loss_curr)
+                message = "{:15}|{:20}".format(it, -loss_curr)
                 print(message)
         print("Final marginal params:\n", marginal_params.eval(session=sess))
         return proposal_params, sess

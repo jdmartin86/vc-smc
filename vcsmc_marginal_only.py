@@ -353,7 +353,7 @@ class VCSLAM():
         Creates the top-level computation graph for training
         """
         print("Starting training")
-        tf.reset_default_graph()
+        # tf.reset_default_graph()
         # initializer = tf.contrib.layers.xavier_initializer()
         dependency_initializer = tf.contrib.layers.xavier_initializer()
         marginal_initializer = tf.constant_initializer()

@@ -7,10 +7,8 @@ from vcsmc_marginal_only import *
 from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 
-
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
-
 
 class RangeBearingAgent(VCSLAMAgent):
     def __init__(self,
@@ -48,13 +46,13 @@ class RangeBearingAgent(VCSLAMAgent):
         return 0
 
     def get_marginal_param_shape(self):
-        return [3,1]
+        return [self.num_steps, self.state_dim*3]
 
     def generate_data(self):
         # print(self.target_params)
         init_pose, init_cov, A, Q, C, R = self.target_params
-        Dx = init_pose.shape[0]
-        Dz = R.shape[0]
+        Dx = init_pose.get_shape().as_list()[0]
+        Dz = R.get_shape().as_list()[0]
 
         x_true = []
         z_true = []
@@ -77,9 +75,9 @@ class RangeBearingAgent(VCSLAMAgent):
         init_pose, init_cov, A, Q, C, R = self.target_params
         num_particles = x_prev.get_shape().as_list()[0]
         proposal_marg_params = proposal_params[1]
-        mut = proposal_marg_params[0]
-        lint = proposal_marg_params[1]
-        log_s2t = proposal_marg_params[2]
+        mut = proposal_marg_params[t,0:3]
+        lint = proposal_marg_params[t,3:6]
+        log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
             mu = mut + tf.matmul(A, x_prev)*lint
@@ -94,21 +92,22 @@ class RangeBearingAgent(VCSLAMAgent):
         return tf.zeros(shape=(num_particles), dtype=tf.float32)
 
     def log_normal(self, x, mu, Sigma):
-        if(type(Sigma).__module__ == "numpy"):
-            dim = Sigma.shape[0]
-        else:
-            dim = Sigma.get_shape().as_list()[0]
+        dim = Sigma.get_shape().as_list()[0]
         sign, logdet = tf.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
         Prec = tf.dtypes.cast(tf.linalg.inv(Sigma), dtype=tf.float32)
-        first_term = x - mu.T
-        second_term = tf.matmul(Prec, tf.transpose(x-mu.T))
-        ls_term = -0.5*tf.reduce_sum(tf.transpose(tf.matmul(first_term, second_term)),1)
+        # print(mu)
+        # print(mu.get_shape().as_list()[0])
+        first_term = x - tf.transpose(mu)
+        # print(first_term.get_shape().as_list())
+        second_term = tf.transpose(tf.matmul(Prec, tf.transpose(x-tf.transpose(mu))))
+        ls_term = -0.5*tf.reduce_sum(first_term*second_term,1)
+        # print(ls_term.get_shape().as_list())
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
-    def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
-        return tf.log(p1*tf.exp(self.log_normal(x, mu1, Sigma)) +
-                      p2*tf.exp(self.log_normal(x, mu2, Sigma)))
+    # def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
+    #     return tf.log(p1*tf.exp(self.log_normal(x, mu1, Sigma)) +
+    #                   p2*tf.exp(self.log_normal(x, mu2, Sigma)))
 
     def log_target(self, t, x_curr, x_prev, observ):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -116,20 +115,20 @@ class RangeBearingAgent(VCSLAMAgent):
             logF = self.log_normal(x_curr, tf.matmul(A, x_prev), Q)
         else:
             logF = self.log_normal(x_curr, init_pose, init_cov)
-        logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), observ[t], R)
+        logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.convert_to_tensor(observ[t], dtype=tf.float32), R)
         return logF + logG
 
     def log_proposal_marginal(self, t, x_curr, x_prev, observ, proposal_params):
         init_pose, init_cov, A, Q, C, R = self.target_params
         proposal_marg_params = proposal_params[1]
-        mut = proposal_marg_params[0]
-        lint = proposal_marg_params[1]
-        log_s2t = proposal_marg_params[2]
+        mut = proposal_marg_params[t,0:3]
+        lint = proposal_marg_params[t,3:6]
+        log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
             mu = mut + tf.matmul(A, x_prev)
         else:
-            mu = mut + lint*init_pose
+            mu = tf.transpose(mut + lint*tf.transpose(init_pose))
         return self.log_normal(x_curr, mu, tf.diag(s2t))
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
@@ -158,12 +157,12 @@ if __name__ == '__main__':
     num_steps = 1
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
-    init_pose = np.zeros([3,1],dtype=np.float32)
-    init_cov = np.eye(3,3,dtype=np.float32)
-    A = 1.1*np.eye(3,3,dtype=np.float32)
-    Q = np.eye(3,3,dtype=np.float32)
-    C = np.eye(2,3,dtype=np.float32)
-    R = np.eye(2,2,dtype=np.float32)
+    init_pose = tf.zeros([3,1],dtype=np.float32)
+    init_cov = 0.25*tf.eye(3,3,dtype=np.float32)
+    A = 1.1*tf.eye(3,3,dtype=np.float32)
+    Q = 0.5*tf.eye(3,3,dtype=np.float32)
+    C = tf.eye(2,3,dtype=np.float32)
+    R = 0.25*tf.eye(2,2,dtype=np.float32)
     target_params = [init_pose,
                      init_cov,
                      A,
@@ -174,9 +173,9 @@ if __name__ == '__main__':
     x_true, z_true = td_agent.generate_data()
     sess = tf.Session()
     xt_vals, zt_vals = sess.run([x_true, z_true])
+    print type(zt_vals)
     # print("X True vals: ", xt_vals)
     # print("Z True vals: ", zt_vals)
-    zt_vals = np.array([[0.0, 0.0], [1.0, 1.0]])
 
     """
         Plot True
@@ -200,11 +199,11 @@ if __name__ == '__main__':
 
 
     # Number of particles to use
-    num_particles = 10
+    num_particles = 100
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 10
+    num_train_steps = 10000
     # Learning rate for the distribution
-    lr_m = 0.001
+    lr_m = 0.005
     # Random seed for VCSLAM
     slam_rs = np.random.RandomState(0)
 
@@ -215,9 +214,29 @@ if __name__ == '__main__':
                  num_train_steps = num_train_steps,
                  lr_m = lr_m,
                  rs = slam_rs)
-    tf.reset_default_graph()
+    # tf.reset_default_graph()
     # td_agent = RangeBearingAgent(target_params=target_params, rs=agent_rs, num_steps=num_steps)
     opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)
+    num_samps = 100
+    my_vars = [vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent) for i in range(num_samps)]
+    my_samples = train_sess.run(my_vars)
+    print("done1")
+    samples_np = np.array(my_samples)
+    plt.scatter(samples_np[:,0], samples_np[:,1], color='blue')
+    # sbs.kdeplot(samples_np[:,0], samples_np[:,1])
+
+    xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
+    # gen_sample_values = np.array([sess.run([td_agent.generate_data()[0]]) for i in range(num_samps)]).reshape(num_samps, td_agent.state_dim)
+    gen_vars = [td_agent.generate_data()[0] for i in range(num_samps)]
+    gen_sample_values = np.array(sess.run(gen_vars)).reshape(num_samps, td_agent.state_dim)
+
+    print(gen_sample_values.shape)
+    print(xt_vals)
+    plt.scatter(xt_vals[:,0], xt_vals[:,1], color='red')
+    # sbs.kdeplot(gen_sample_values[:,0], gen_sample_values[:,1], color='red')
+    plt.scatter(gen_sample_values[:,0], gen_sample_values[:,1], color='black')
+    plt.show()
+
     # slam_rs = np.random.RandomState(0)
     # observ = np.array([0.0])
     # vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = num_particles, num_train_steps=1000, lr_m=0.001, rs=slam_rs)

@@ -19,7 +19,8 @@ class RangeBearingAgent(VCSLAMAgent):
                  landmark_dim=2,
                  latent_dim=None,
                  observ_dim=2,
-                 rs=np.random.RandomState(0)):
+                 rs=np.random.RandomState(0),
+                 prop_scale=0.9):
         # Target model params
         self.target_params = target_params
         # Number of time steps
@@ -39,6 +40,7 @@ class RangeBearingAgent(VCSLAMAgent):
         self.observ_dim = observ_dim
         # Proposal params
         self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
+        self.prop_scale = prop_scale
 
         self.rs = rs
 
@@ -47,6 +49,16 @@ class RangeBearingAgent(VCSLAMAgent):
 
     def get_marginal_param_shape(self):
         return [self.num_steps, self.state_dim*3]
+
+    def init_marg_params(self):
+        T = self.num_steps
+        Dx = self.state_dim
+        marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
+                 1. + self.prop_scale * self.rs.randn(Dx), # Linear times A/mu0
+                 self.prop_scale * self.rs.randn(Dx)]).ravel() # Log-var
+                for t in range(T)])
+        print "Marg param shape: ", marg_params.shape
+        return marg_params
 
     def generate_data(self):
         # print(self.target_params)
@@ -70,6 +82,70 @@ class RangeBearingAgent(VCSLAMAgent):
             z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(tf.matmul(C,x_true[t])),
                                                                covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
         return x_true, z_true
+
+    # def log_marginal_likelihood(self, observ):
+    #     """
+    #         Completely untested
+    #     """
+    #     init_pose, init_cov, A, Q, C, R = self.target_params
+    #     Dx = init_pose.get_shape().as_list()[0]
+    #     Dy = R.get_shape().as_list()[0]
+    #     log_likelihood = 0.0
+    #     xfilt = tf.zeros(Dx)
+    #     Pfilt = tf.zeros([Dx, Dx])
+    #     xpred = init_pose
+    #     Ppred = init_cov
+    #     for t in range(self.num_steps):
+    #         if t > 0:
+    #             # Predict Step
+    #             xpred = tf.matmul(A, xfilt)
+    #             Ppred = tf.matmul(A, tf.matmul(Pfilt, tf.transpose(A))) + Q
+    #         # Update step
+    #         yt = observ[t,:] - tf.matmul(C, xpred)
+    #         S = tf.matmul(C, tf.matmul(Ppred, tf.transpose(C))) + R
+    #         K = tf.transpose(tf.linalg.solve(S, tf.matmul(C, Ppred)))
+    #         xfilt = xpred + tf.matmul(K,yt)
+    #         Pfilt = Ppred + tf.matmul(K, tf.matmul(C,Ppred))
+    #         sign, logdet = tf.linalg.slogdet(S)
+    #         log_likelihood += -0.5*(tf.reduce_sum(yt*tf.linalg.solve(S,yt))) + logdet + Dy*tf.log(2.*np.pi)
+    #     return log_likelihood
+
+
+    def lgss_posterior_params(self, observ, T):
+        """
+            Apply a Kalman filter to the linear Gaussian state space model
+            Returns p(x_T | z_{1:T}) when supplied with z's and T
+            Completely untested
+        """
+        init_pose, init_cov, A, Q, C, R = self.target_params
+        Dx = init_pose.get_shape().as_list()[0]
+        Dy = R.get_shape().as_list()[0]
+        log_likelihood = 0.0
+        xfilt = tf.zeros(Dx)
+        Pfilt = tf.zeros([Dx, Dx])
+        xpred = init_pose
+        Ppred = init_cov
+        for t in range(self.num_steps):
+            if t > 0:
+                # Predict Step
+                xpred = tf.matmul(A, xfilt)
+                Ppred = tf.matmul(A, tf.matmul(Pfilt, tf.transpose(A))) + Q
+            # Update step
+            yt = observ[t] - tf.matmul(C, xpred)
+            S = tf.matmul(C, tf.matmul(Ppred, tf.transpose(C))) + R
+            K = tf.transpose(tf.linalg.solve(S, tf.matmul(C, Ppred)))
+            xfilt = xpred + tf.matmul(K,yt)
+            Pfilt = Ppred + tf.matmul(K, tf.matmul(C,Ppred))
+        return xfilt, Pfilt
+
+    # def sim_target(self, t, x_curr, x_prev, observ)
+    #     init_pose, init_cov, A, Q, C, R = self.target_params
+    #     if t > 0:
+    #         logF = self.log_normal(x_curr, tf.matmul(A, x_prev), Q)
+    #     else:
+    #         logF = self.log_normal(x_curr, init_pose, init_cov)
+    #     logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.convert_to_tensor(observ[t], dtype=tf.float32), R)
+    #     return logF + logG
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -174,8 +250,9 @@ if __name__ == '__main__':
     sess = tf.Session()
     xt_vals, zt_vals = sess.run([x_true, z_true])
     print type(zt_vals)
+    # Number of samples to use for plotting
     # print("X True vals: ", xt_vals)
-    # print("Z True vals: ", zt_vals)
+    print("Z True vals: ", zt_vals[0].shape)
 
     """
         Plot True
@@ -201,11 +278,14 @@ if __name__ == '__main__':
     # Number of particles to use
     num_particles = 100
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 10000
+    num_train_steps = 10
     # Learning rate for the distribution
-    lr_m = 0.005
+    lr_m = 0.001
     # Random seed for VCSLAM
     slam_rs = np.random.RandomState(0)
+
+    # Number of samples to use for plotting
+    num_samps = 1000
 
     # Create the VCSLAM instance with above parameters
     vcs = VCSLAM(vcs_agent = td_agent,
@@ -214,57 +294,43 @@ if __name__ == '__main__':
                  num_train_steps = num_train_steps,
                  lr_m = lr_m,
                  rs = slam_rs)
-    # tf.reset_default_graph()
-    # td_agent = RangeBearingAgent(target_params=target_params, rs=agent_rs, num_steps=num_steps)
+
+    # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
+    post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
+    print("Post mean shape: ", post_mean.get_shape().as_list())
+    post_samples = tfd.MultivariateNormalFullCovariance(loc=tf.transpose(post_mean),
+                                                        covariance_matrix=post_cov).sample(sample_shape = num_samps, seed = td_agent.rs.randint(0,1234))
+    post_values = sess.run([post_samples])
+    post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
+    print("Post values shape: ", np.array(post_values).shape)
+    sbs.kdeplot(post_values[:,0], post_values[:,1], color='green')
+
     opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)
-    num_samps = 100
-    my_vars = [vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent) for i in range(num_samps)]
-    my_samples = train_sess.run(my_vars)
+    opt_propsal_params = train_sess.run(opt_propsal_params)
+    print("opt params", opt_propsal_params)
+    my_vars = [vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)]
+    my_samples = [train_sess.run(my_vars) for i in range(num_samps)]
     print("done1")
-    samples_np = np.array(my_samples)
-    plt.scatter(samples_np[:,0], samples_np[:,1], color='blue')
-    # sbs.kdeplot(samples_np[:,0], samples_np[:,1])
+    samples_np = np.array(my_samples).reshape(num_samps, td_agent.state_dim)
+    print(samples_np.shape)
+    # plt.scatter(samples_np[:,0], samples_np[:,1], color='blue')
+    sbs.kdeplot(samples_np[:,0], samples_np[:,1], color='blue')
 
     xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
     # gen_sample_values = np.array([sess.run([td_agent.generate_data()[0]]) for i in range(num_samps)]).reshape(num_samps, td_agent.state_dim)
-    gen_vars = [td_agent.generate_data()[0] for i in range(num_samps)]
-    gen_sample_values = np.array(sess.run(gen_vars)).reshape(num_samps, td_agent.state_dim)
+    # gen_vars = [td_agent.generate_data()[0] for i in range(num_samps)]
+    # gen_sample_values = np.array(sess.run(gen_vars)).reshape(num_samps, td_agent.state_dim)
 
-    print(gen_sample_values.shape)
+    # print(gen_sample_values.shape)
     print(xt_vals)
+    zt_vals = np.array(zt_vals)
     plt.scatter(xt_vals[:,0], xt_vals[:,1], color='red')
+    plt.figure()
+    sbs.kdeplot(samples_np[:,1],samples_np[:,2],color='blue')
+    sbs.kdeplot(post_values[:,1],post_values[:,2], color='green')
+    # plt.scatter(zt_vals[:,0], zt_vals[:,1], color='green')
     # sbs.kdeplot(gen_sample_values[:,0], gen_sample_values[:,1], color='red')
-    plt.scatter(gen_sample_values[:,0], gen_sample_values[:,1], color='black')
+    # plt.scatter(gen_sample_values[:,0], gen_sample_values[:,1], color='black')
+
     plt.show()
-
-    # slam_rs = np.random.RandomState(0)
-    # observ = np.array([0.0])
-    # vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = num_particles, num_train_steps=1000, lr_m=0.001, rs=slam_rs)
-    # # tf.get_default_graph().finalize()
-    # opt_proposal_params, sess = vcs.train(vcs_agent = td_agent)
-
-    # print(sess.run(opt_proposal_params))
-
-    # num_samps = 200
-    # my_vars = [vcs.sim_q(opt_proposal_params, None, observ, td_agent) for i in range(num_samps)]
-    # my_samples = sess.run(my_vars)
-    # print(my_samples[0])
-    # # print(my_samples)
-    # sbs.distplot(my_samples, color='blue')
-
-    # # uncomment to do plotting of log target
-    # # target_samples = td_agent.sim_target(num_particles)
-    # # target_sample_values = target_samples.eval(session=sess)
-    # # print(target_sample_values)
-    # # print(target_sample_values.shape)
-    # # sbs.distplot(target_sample_values, color='green')
-    # # plt.show()
-
-    # query_points = np.linspace(-2.0, 4.0, 50)
-    # print("QP shape", query_points.shape)
-    # # query_values = np.array([tf.exp(td_agent.log_mixture(xi, 0.0, 0.25*np.eye(1))).eval(session=sess) for xi in query_points]).ravel()
-    # target_vars = [tf.exp(td_agent.log_target(1, tf.constant([[xi]],dtype=tf.float32), xi, observ=0.0)) for xi in query_points]
-    # target_values = np.array(sess.run([target_vars])).ravel()
-    # plt.plot(query_points, target_values, color='red')
-    # plt.show()
 

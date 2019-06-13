@@ -20,7 +20,7 @@ class RangeBearingAgent(VCSLAMAgent):
                  latent_dim=None,
                  observ_dim=2,
                  rs=np.random.RandomState(0),
-                 prop_scale=0.9):
+                 prop_scale=0.5):
         # Target model params
         self.target_params = target_params
         # Number of time steps
@@ -116,6 +116,7 @@ class RangeBearingAgent(VCSLAMAgent):
             Apply a Kalman filter to the linear Gaussian state space model
             Returns p(x_T | z_{1:T}) when supplied with z's and T
             Completely untested
+            I'm a little worried this is wrong
         """
         init_pose, init_cov, A, Q, C, R = self.target_params
         Dx = init_pose.get_shape().as_list()[0]
@@ -146,6 +147,7 @@ class RangeBearingAgent(VCSLAMAgent):
     #         logF = self.log_normal(x_curr, init_pose, init_cov)
     #     logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.convert_to_tensor(observ[t], dtype=tf.float32), R)
     #     return logF + logG
+
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -234,11 +236,11 @@ if __name__ == '__main__':
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
     init_pose = tf.zeros([3,1],dtype=np.float32)
-    init_cov = 0.25*tf.eye(3,3,dtype=np.float32)
+    init_cov = tf.eye(3,3,dtype=np.float32)
     A = 1.1*tf.eye(3,3,dtype=np.float32)
     Q = 0.5*tf.eye(3,3,dtype=np.float32)
     C = tf.eye(2,3,dtype=np.float32)
-    R = 0.25*tf.eye(2,2,dtype=np.float32)
+    R = tf.eye(2,2,dtype=np.float32)
     target_params = [init_pose,
                      init_cov,
                      A,
@@ -278,14 +280,14 @@ if __name__ == '__main__':
     # Number of particles to use
     num_particles = 100
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 10
+    num_train_steps = 1000
     # Learning rate for the distribution
     lr_m = 0.001
     # Random seed for VCSLAM
     slam_rs = np.random.RandomState(0)
 
     # Number of samples to use for plotting
-    num_samps = 1000
+    num_samps = 10000
 
     # Create the VCSLAM instance with above parameters
     vcs = VCSLAM(vcs_agent = td_agent,
@@ -298,9 +300,13 @@ if __name__ == '__main__':
     # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
     post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
     print("Post mean shape: ", post_mean.get_shape().as_list())
-    post_samples = tfd.MultivariateNormalFullCovariance(loc=tf.transpose(post_mean),
-                                                        covariance_matrix=post_cov).sample(sample_shape = num_samps, seed = td_agent.rs.randint(0,1234))
-    post_values = sess.run([post_samples])
+    # post_samples = tfd.MultivariateNormalFullCovariance(loc=tf.transpose(post_mean),
+    #                                                     covariance_matrix=post_cov).sample(sample_shape = num_samps, seed = td_agent.rs.randint(0,1234))
+    # post_values = sess.run([post_samples])
+    p_mu, p_cov = sess.run([post_mean, post_cov])
+    print(p_mu.T.shape)
+    post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
+    print("pv shape: ", post_values.shape)
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
     print("Post values shape: ", np.array(post_values).shape)
     sbs.kdeplot(post_values[:,0], post_values[:,1], color='green')
@@ -328,6 +334,9 @@ if __name__ == '__main__':
     plt.figure()
     sbs.kdeplot(samples_np[:,1],samples_np[:,2],color='blue')
     sbs.kdeplot(post_values[:,1],post_values[:,2], color='green')
+    plt.figure()
+    sbs.distplot(samples_np[:,1], color='blue')
+    sbs.distplot(post_values[:,1], color='green')
     # plt.scatter(zt_vals[:,0], zt_vals[:,1], color='green')
     # sbs.kdeplot(gen_sample_values[:,0], gen_sample_values[:,1], color='red')
     # plt.scatter(gen_sample_values[:,0], gen_sample_values[:,1], color='black')

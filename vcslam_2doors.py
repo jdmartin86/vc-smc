@@ -83,13 +83,15 @@ class TwoDoorsAgent(VCSLAMAgent):
         # return log_norm - 0.5*tf.reduce_sum((x-mu)*tf.tensordot(Prec,(x-mu).T,1).T)
         return tf.convert_to_tensor(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
-    def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
+    def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=5.0):
         return tf.log(p1*tf.exp(self.log_normal(x, mu1, Sigma)) +
                       p2*tf.exp(self.log_normal(x, mu2, Sigma)))
 
     def log_target(self, t, x_curr, x_prev, observ):
+        # logF = self.log_normal(x_curr, tf.constant(0.0, dtype=tf.float32), 1.0*tf.eye(1, dtype=tf.float32))
         logG = self.log_mixture(x_curr, tf.constant(0.0, dtype=tf.float32), 0.25*tf.eye(1,dtype=tf.float32))
         # logG = self.log_normal(x_curr, tf.constant(1.0, dtype=tf.float32), 0.25*tf.eye(1,dtype=tf.float32))
+        # return logF + logG
         return logG
 
     def log_proposal_marginal(self, t, x_curr, x_prev, observ, proposal_params):
@@ -139,13 +141,13 @@ if __name__ == '__main__':
 
     slam_rs = np.random.RandomState(0)
     observ = np.array([0.0])
-    vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = 100, num_train_steps=100, lr_m=0.001, rs=slam_rs)
+    vcs = VCSLAM(vcs_agent = td_agent, observ = observ, num_particles = num_particles, num_train_steps=1000, lr_m=0.001, rs=slam_rs)
     # tf.get_default_graph().finalize()
     opt_proposal_params, sess = vcs.train(vcs_agent = td_agent)
 
     print(sess.run(opt_proposal_params))
 
-    num_samps = 100
+    num_samps = 20
     my_vars = [vcs.sim_q(opt_proposal_params, None, observ, td_agent) for i in range(num_samps)]
     my_samples = sess.run(my_vars)
     print(my_samples[0])
@@ -160,7 +162,7 @@ if __name__ == '__main__':
     # sbs.distplot(target_sample_values, color='green')
     # plt.show()
 
-    query_points = np.linspace(-2.0, 4.0, 50)
+    query_points = np.linspace(-2.0, 12.0, 50)
     print("QP shape", query_points.shape)
     # query_values = np.array([tf.exp(td_agent.log_mixture(xi, 0.0, 0.25*np.eye(1))).eval(session=sess) for xi in query_points]).ravel()
     target_vars = [tf.exp(td_agent.log_target(1, tf.constant([[xi]],dtype=tf.float32), xi, observ=0.0)) for xi in query_points]

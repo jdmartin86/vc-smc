@@ -1,4 +1,5 @@
 from __future__ import print_function
+import timeit
 import sys
 import numpy as np
 import tensorflow as tf
@@ -252,6 +253,7 @@ class VCSLAM():
         #w      = tf.nn.softmax(logits=logW)
         #ESS = 1./np.sum(W**2)/N
 
+        # start_smc = timeit.default_timer()
         for t in range(self.num_steps):
             # Resampling
             # Shape of x_prev (num_particles,latent_dim)
@@ -284,6 +286,7 @@ class VCSLAM():
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
+        # print("Train SMC Time: ", (timeit.default_timer() - start_smc))
         return logZ
 
     def sim_q(self, prop_params, model_params, y, vcs_obj):
@@ -308,6 +311,7 @@ class VCSLAM():
         #w      = tf.nn.softmax(logits=logW)
         #ESS = 1./np.sum(W**2)/N
 
+        # start_smc = timeit.default_timer()
         for t in range(self.num_steps):
             # Resampling
             # Shape of x_prev (num_particles,latent_dim)
@@ -340,9 +344,12 @@ class VCSLAM():
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
+        # print("SMC time: ", (timeit.default_timer() - start_smc))
         # Sample from the empirical approximation
         # print("LogW tilde: ", logw_tilde)
+        # start_sample_traj = timeit.default_timer()
         B = self.sample_traj(logw_tilde)
+        # print("Sample traj time: ", (timeit.default_timer() - start_sample_traj))
         # B = self.sample_traj(logW)
         # print("B: ", B)
         return tf.gather(x_curr,B,axis=0)
@@ -356,7 +363,8 @@ class VCSLAM():
         # tf.reset_default_graph()
         # initializer = tf.contrib.layers.xavier_initializer()
         dependency_initializer = tf.contrib.layers.xavier_initializer()
-        marginal_initializer = tf.constant_initializer()
+        # marginal_initializer = tf.constant_initializer()
+        marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
 
         # Initialize the parameters
         if vcs_agent.get_dependency_param_shape() == 0:

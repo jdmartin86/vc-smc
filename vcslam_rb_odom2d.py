@@ -32,10 +32,11 @@ class RangeBearingAgent(VCSLAMAgent):
         # Landmark dimensionality (x)
         self.landmark_dim = landmark_dim
         # Latent variable dimensionality
-        if not latent_dim:
-            self.latent_dim = self.num_steps * (self.state_dim + self.landmark_dim*self.num_landmarks)
-        else:
-            self.latent_dim = latent_dim
+        # if not latent_dim:
+        #     self.latent_dim = self.num_steps * (self.state_dim + self.landmark_dim*self.num_landmarks)
+        # else:
+        #     self.latent_dim = latent_dim
+        self.latent_dim = (self.state_dim + self.landmark_dim*self.num_landmarks)
         # Observation dimensionality (direct observations of x_door)
         self.observ_dim = observ_dim
         # Proposal params
@@ -158,9 +159,16 @@ class RangeBearingAgent(VCSLAMAgent):
         log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
-            mu = mut + tf.matmul(A, x_prev)*lint
+            print("xprev shape: ", x_prev.get_shape().as_list())
+            print("shape of mult: ", (tf.matmul(A, tf.transpose(x_prev))))
+            mu = mut + tf.transpose(tf.matmul(A, tf.transpose(x_prev)))*lint
+            print("T1", mu.shape)
         else:
-            mu = mut + lint*tf.zeros([3,])#init_pose
+            print("lint: ", lint.get_shape().as_list())
+            print("init pose: ", init_pose.get_shape().as_list())
+            print("Mut: ", mut.get_shape().as_list())
+            mu = mut + lint*tf.reshape(init_pose, (self.state_dim,))
+            print("T0", mu.shape)
         # print("x prev shape", x_prev.get_shape().as_list())
         sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
         return sample
@@ -190,7 +198,7 @@ class RangeBearingAgent(VCSLAMAgent):
     def log_target(self, t, x_curr, x_prev, observ):
         init_pose, init_cov, A, Q, C, R = self.target_params
         if t > 0:
-            logF = self.log_normal(x_curr, tf.matmul(A, x_prev), Q)
+            logF = self.log_normal(x_curr, tf.matmul(A, tf.transpose(x_prev)), Q)
         else:
             logF = self.log_normal(x_curr, init_pose, init_cov)
         logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.convert_to_tensor(observ[t], dtype=tf.float32), R)
@@ -232,7 +240,7 @@ if __name__ == '__main__':
     agent_rs = np.random.RandomState(0)
 
     # Number of steps for the trajectory
-    num_steps = 1
+    num_steps = 2
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
     init_pose = tf.zeros([3,1],dtype=np.float32)

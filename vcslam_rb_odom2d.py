@@ -58,7 +58,7 @@ class RangeBearingAgent(VCSLAMAgent):
                  1. + self.prop_scale * self.rs.randn(Dx), # Linear times A/mu0
                  self.prop_scale * self.rs.randn(Dx)]).ravel() # Log-var
                 for t in range(T)])
-        print "Marg param shape: ", marg_params.shape
+        print( "Marg param shape: ", marg_params.shape )
         return marg_params
 
     def generate_data(self):
@@ -259,7 +259,7 @@ if __name__ == '__main__':
     x_true, z_true = td_agent.generate_data()
     sess = tf.Session()
     xt_vals, zt_vals = sess.run([x_true, z_true])
-    print type(zt_vals)
+    print( type(zt_vals) )
     # Number of samples to use for plotting
     # print("X True vals: ", xt_vals)
     print("Z True vals: ", zt_vals[0].shape)

@@ -10,11 +10,12 @@ from matplotlib.collections import LineCollection
 import seaborn as sbs
 
 from vcsmc import *
+import vcslam_agent
 
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
 
-class RangeBearingAgent(VCSLAMAgent):
+class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
     def __init__(self,
                  target_params,
                  num_steps=2,
@@ -228,16 +229,15 @@ if __name__ == '__main__':
     # List available devices
     #local_device_protos = device_lib.list_local_devices()
     #print([x.name for x in local_device_protos])
-
     # Optionally use accelerated computation
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 2
+    num_steps = 1
     # Number of particles to use
     num_particles = 100
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 10000
+    num_train_steps = 1000
     # Learning rate for the distribution
     lr_m = 0.001
     num_seeds = 1
@@ -252,14 +252,9 @@ if __name__ == '__main__':
     Q = 0.5*tf.eye(3,3,dtype=np.float32)
     C = tf.eye(2,3,dtype=np.float32)
     R = tf.eye(2,2,dtype=np.float32)
-    target_params = [init_pose,
-                     init_cov,
-                     A,
-                     Q,
-                     C,
-                     R]
+    target_params = [init_pose,init_cov,A,Q,C,R]
 
-
+    # Create the session
     sess = tf.Session()
 
     # Create the agent 
@@ -301,10 +296,9 @@ if __name__ == '__main__':
         samples_np = np.array(my_samples).reshape(num_samps, td_agent.state_dim)
 
     # plots TODO: clean up more and add other relevant plots
-    xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-    zt_vals = np.array(zt_vals)
-    plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
-    plotting.plot_dist(samples_np,post_values)
-
-    plt.show()
+    #xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
+    #zt_vals = np.array(zt_vals)
+    #plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
+    #plotting.plot_dist(samples_np,post_values)
+    #plt.show()
 

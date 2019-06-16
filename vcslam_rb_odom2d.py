@@ -58,7 +58,6 @@ class RangeBearingAgent(VCSLAMAgent):
                  1. + self.prop_scale * self.rs.randn(Dx), # Linear times A/mu0
                  self.prop_scale * self.rs.randn(Dx)]).ravel() # Log-var
                 for t in range(T)])
-        print( "Marg param shape: ", marg_params.shape )
         return marg_params
 
     def generate_data(self):
@@ -159,17 +158,9 @@ class RangeBearingAgent(VCSLAMAgent):
         log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
-            print("xprev shape: ", x_prev.get_shape().as_list())
-            print("shape of mult: ", (tf.matmul(A, tf.transpose(x_prev))))
             mu = mut + tf.transpose(tf.matmul(A, tf.transpose(x_prev)))*lint
-            print("T1", mu.shape)
         else:
-            print("lint: ", lint.get_shape().as_list())
-            print("init pose: ", init_pose.get_shape().as_list())
-            print("Mut: ", mut.get_shape().as_list())
             mu = mut + lint*tf.reshape(init_pose, (self.state_dim,))
-            print("T0", mu.shape)
-        # print("x prev shape", x_prev.get_shape().as_list())
         sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
         return sample
 
@@ -228,12 +219,15 @@ class RangeBearingAgent(VCSLAMAgent):
         prop_log = tf.debugging.check_numerics(prop_log, "Proposal log error")
         return target_log - prop_log
 
+
 if __name__ == '__main__':
     # List available devices
-    local_device_protos = device_lib.list_local_devices()
-    print([x.name for x in local_device_protos])
+    #local_device_protos = device_lib.list_local_devices()
+    #print([x.name for x in local_device_protos])
+
     # Optionally use accelerated computation
     # with tf.device("/device:XLA_CPU:0"):
+
     # Set random seeds
     np.random.seed(1)
     tf.random.set_random_seed(1)
@@ -241,6 +235,7 @@ if __name__ == '__main__':
 
     # Number of steps for the trajectory
     num_steps = 1
+
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
     init_pose = tf.zeros([3,1],dtype=np.float32)
@@ -255,37 +250,11 @@ if __name__ == '__main__':
                      Q,
                      C,
                      R]
+
     td_agent = RangeBearingAgent(target_params=target_params, rs=agent_rs, num_steps=num_steps)
-   
-    print("Generating data")
     x_true, z_true = td_agent.generate_data()
     sess = tf.Session()
     xt_vals, zt_vals = sess.run([x_true, z_true])
-    print( type(zt_vals) )
-    # Number of samples to use for plotting
-    # print("X True vals: ", xt_vals)
-    print("Z True vals: ", zt_vals[0].shape)
-
-    """
-        Plot True
-    """
-    # xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-    # # print("Shape of X true", xt_vals.shape)
-
-    # points = np.array([xt_vals[:,0], xt_vals[:,1]]).transpose().reshape(-1,1,2)
-    # # print points.shape  # Out: (len(x),1,2)
-
-    # segs = np.concatenate([points[:-2], points[1:-1], points[2:]], axis=1)
-    # # print segs.shape
-    # color = np.linspace(0,1,xt_vals.shape[0])
-    # lc = LineCollection(segs, cmap=plt.get_cmap('viridis'))
-    # lc.set_array(color)
-    # plt.gca().add_collection(lc)
-    # plt.xlim(xt_vals[:,0].min(), xt_vals[:,0].max())
-    # plt.ylim(xt_vals[:,1].min(), xt_vals[:,1].max())
-    # plt.plot(xt_vals[:,0], xt_vals[:,1])
-    # plt.show()
-
 
     # Number of particles to use
     num_particles = 100
@@ -309,26 +278,20 @@ if __name__ == '__main__':
 
     # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
     post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
-    print("Post mean shape: ", post_mean.get_shape().as_list())
+
     # post_samples = tfd.MultivariateNormalFullCovariance(loc=tf.transpose(post_mean),
     #                                                     covariance_matrix=post_cov).sample(sample_shape = num_samps, seed = td_agent.rs.randint(0,1234))
     # post_values = sess.run([post_samples])
     p_mu, p_cov = sess.run([post_mean, post_cov])
-    print(p_mu.T.shape)
     post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
-    print("pv shape: ", post_values.shape)
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
-    print("Post values shape: ", np.array(post_values).shape)
     sbs.kdeplot(post_values[:,0], post_values[:,1], color='green')
 
     opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)
     opt_propsal_params = train_sess.run(opt_propsal_params)
-    print("opt params", opt_propsal_params)
     my_vars = [vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)]
     my_samples = [train_sess.run(my_vars) for i in range(num_samps)]
-    print("done1")
     samples_np = np.array(my_samples).reshape(num_samps, td_agent.state_dim)
-    print(samples_np.shape)
     # plt.scatter(samples_np[:,0], samples_np[:,1], color='blue')
     sbs.kdeplot(samples_np[:,0], samples_np[:,1], color='blue')
 
@@ -337,7 +300,6 @@ if __name__ == '__main__':
     # gen_vars = [td_agent.generate_data()[0] for i in range(num_samps)]
     # gen_sample_values = np.array(sess.run(gen_vars)).reshape(num_samps, td_agent.state_dim)
     # print(gen_sample_values.shape)
-    print(xt_vals)
     zt_vals = np.array(zt_vals)
     plt.scatter(xt_vals[:,0], xt_vals[:,1], color='red')
     plt.figure()

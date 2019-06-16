@@ -378,9 +378,9 @@ class VCSLAM():
                                             dtype=tf.float32,
                                             shape=vcs_agent.get_marginal_param_shape(),
                                             initializer=marginal_initializer)
-        print("Marginal params shape", marginal_params.shape)
+        #print("Marginal params shape", marginal_params.shape)
         proposal_params = [dependency_params,marginal_params]
-        print("Length of proposal params", len(proposal_params))
+        
         # Compute losses and define the learning procedures
         loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
 

@@ -240,7 +240,7 @@ if __name__ == '__main__':
     agent_rs = np.random.RandomState(0)
 
     # Number of steps for the trajectory
-    num_steps = 2
+    num_steps = 1
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
     init_pose = tf.zeros([3,1],dtype=np.float32)

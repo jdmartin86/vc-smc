@@ -419,26 +419,7 @@ class VCSLAM():
             # mar_losses[it] = loss_curr
 
             if it % iter_display == 0:
-                message = "{:15}|{:20}".format(it, -loss_curr)
+                message = "{:15}|{!s:20}".format(it, -loss_curr)
                 print(message)
         print("Final marginal params:\n", marginal_params.eval(session=sess))
         return proposal_params, sess
-
-
-if __name__ == '__main__':
-    # Instantiate the VC-SLAM agent, which includes a target and a proposal dist
-    # TODO: Implement this class with the test problem we consider, along with associated methods
-    # vcs_agent = VCSLAMAgent()
-    vcs_agent = VCSLAMAgent(num_steps=1, state_dim=1, num_landmarks=2, landmark_dim=1, latent_dim=3, observ_dim=1)
-
-    # Simulate the system to obtain a sequence of observations
-    observ = vcs_agent.sim_target()
-
-    # Instantiate the VC-SLAM procedure
-    vcs = VCSLAM(vcs_agent = vcs_agent , observ = observ , num_particles = 10)
-
-    # Train the approximate model
-    vcs.train(vcs_agent = vcs_agent)
-
-    # Output the SLAM solution
-    #vcs_solution = vcs.sim_q()

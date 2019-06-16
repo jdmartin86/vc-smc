@@ -1,11 +1,15 @@
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.client import device_lib
+import tensorflow.contrib.distributions as tfd
+
+# TODO: consolidate plotting routines
+#import plotting
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import seaborn as sbs
+
 from vcsmc import *
-from tensorflow.python.client import device_lib
-import tensorflow.contrib.distributions as tfd
 
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -42,7 +46,7 @@ class RangeBearingAgent(VCSLAMAgent):
         # Proposal params
         self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
         self.prop_scale = prop_scale
-
+        # Random state for sampling
         self.rs = rs
 
     def get_dependency_param_shape(self):
@@ -228,13 +232,19 @@ if __name__ == '__main__':
     # Optionally use accelerated computation
     # with tf.device("/device:XLA_CPU:0"):
 
-    # Set random seeds
-    np.random.seed(1)
-    tf.random.set_random_seed(1)
-    agent_rs = np.random.RandomState(0)
+    
 
     # Number of steps for the trajectory
     num_steps = 1
+    # Number of particles to use
+    num_particles = 100
+    # Number of iterations to fit the proposal parameters
+    num_train_steps = 1000
+    # Learning rate for the distribution
+    lr_m = 0.001
+    num_seeds = 1
+    # Number of samples to use for plotting
+    num_samps = 10000
 
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
@@ -251,30 +261,28 @@ if __name__ == '__main__':
                      C,
                      R]
 
-    td_agent = RangeBearingAgent(target_params=target_params, rs=agent_rs, num_steps=num_steps)
-    x_true, z_true = td_agent.generate_data()
+  
+
     sess = tf.Session()
-    xt_vals, zt_vals = sess.run([x_true, z_true])
 
-    # Number of particles to use
-    num_particles = 100
-    # Number of iterations to fit the proposal parameters
-    num_train_steps = 1000
-    # Learning rate for the distribution
-    lr_m = 0.001
-    # Random seed for VCSLAM
-    slam_rs = np.random.RandomState(0)
+    for seed in range(num_seeds):
+        # Set random seeds     
+        #np.random.seed(1)
+        tf.random.set_random_seed(1)
+        rs = np.random.RandomState(seed)
 
-    # Number of samples to use for plotting
-    num_samps = 10000
+        # Create an agent for observations
+        td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps)
+        x_true, z_true = td_agent.generate_data()
+        xt_vals, zt_vals = sess.run([x_true, z_true]) # JM: What does this do?
 
-    # Create the VCSLAM instance with above parameters
-    vcs = VCSLAM(vcs_agent = td_agent,
-                 observ = zt_vals,
-                 num_particles = num_particles,
-                 num_train_steps = num_train_steps,
-                 lr_m = lr_m,
-                 rs = slam_rs)
+        # Create the VCSLAM instance with above parameters
+        vcs = VCSLAM(vcs_agent = td_agent,
+                    observ = zt_vals,
+                    num_particles = num_particles,
+                    num_train_steps = num_train_steps,
+                    lr_m = lr_m,
+                    rs = rs)
 
     # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
     post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
@@ -285,6 +293,8 @@ if __name__ == '__main__':
     p_mu, p_cov = sess.run([post_mean, post_cov])
     post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
+    
+
     sbs.kdeplot(post_values[:,0], post_values[:,1], color='green')
 
     opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)

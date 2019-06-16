@@ -1,3 +1,6 @@
+from __future__ import print_function
+import timeit
+import sys
 import numpy as np
 import tensorflow as tf
 
@@ -153,7 +156,8 @@ class VCSLAM():
                 lr_m = 0.0001,
                 adapt_resamp = False,
                 summary_writer=None,
-                summary_writing_frequency=500):
+                summary_writing_frequency=500,
+                rs=np.random.RandomState(0)):
         # VC-SLAM agent
         self.vcs_agent = vcs_agent
         # Number of time steps on the horizon
@@ -190,6 +194,8 @@ class VCSLAM():
         # Cached constant: the logarithm of the number of particles
         self.log_num_particles = tf.log(tf.to_float(self.num_particles))
 
+        self.rs = rs
+
     def resampling(self, log_weights):
         """
         Stratified resampling
@@ -204,7 +210,7 @@ class VCSLAM():
         # log_weights = tf.gather(self.logw,t,axis=1)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         ancestors = tf.stop_gradient(
-            resampling_dist.sample(sample_shape=(self.num_particles)))
+            resampling_dist.sample(sample_shape=(self.num_particles),seed=self.rs.randint(0,1234)))
         return ancestors
 
     def sample_traj(self, log_weights):
@@ -215,8 +221,11 @@ class VCSLAM():
         Returns:
             index: An ancenstral index
         """
+        # print("shape of log weights? ", log_weights)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
-        return resampling_dist.sample()
+        # print(log_weights)
+        samp = resampling_dist.sample(seed=self.rs.randint(0,1234))
+        return samp
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
         """
@@ -244,6 +253,7 @@ class VCSLAM():
         #w      = tf.nn.softmax(logits=logW)
         #ESS = 1./np.sum(W**2)/N
 
+        # start_smc = timeit.default_timer()
         for t in range(self.num_steps):
             # Resampling
             # Shape of x_prev (num_particles,latent_dim)
@@ -258,25 +268,28 @@ class VCSLAM():
             # This simulates one transition from the proposal distribution
             # Shape of x_curr (num_particles,latent_dim)
             # TODO: Revisit the arguments when you implement the class with the proposal and couplas
-            x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, self.num_particles, proposal_params)
+            x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, proposal_params)
+            # x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, self.num_particles, proposal_params)
 
             # Weighting
             # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
             logw_tilde = vcs_agent.log_weights(t, x_curr, x_prev, self.observ, proposal_params)
+            logw_tilde = tf.debugging.check_numerics(logw_tilde, "Error, ahhh!!!")
             max_logw_tilde = tf.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
 
             # Temporarily switched self.log_num_particles to its definition
             # i.e. tf.log(tf.to_float(self.num_particles))
             # This fixed a graph error
-            logZ += tf.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
+            logZ += max_logw_tilde + tf.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles))
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
+        # print("Train SMC Time: ", (timeit.default_timer() - start_smc))
         return logZ
 
-    def sim_q(self, prop_params, model_params, y, smc_obj, rs, verbose=False):
+    def sim_q(self, prop_params, model_params, y, vcs_obj):
         """
         Simulates a single sample from the VSMC approximation.
         This returns the SLAM solution
@@ -289,19 +302,22 @@ class VCSLAM():
 
         # Unnormalized particle weights
         logw_tilde = tf.zeros(dtype=tf.float32,shape=(self.num_particles))
-        logZ   = 0.0
+        logZ = tf.zeros(dtype=tf.float32,shape=(1))
+
+        X = tf.zeros(dtype=tf.float32, shape=(self.num_steps, self.num_particles, self.latent_dim))
 
         # For effective sample size (ESS) calculations
         # TODO: implement after testing regular resampling (04/22)
         #w      = tf.nn.softmax(logits=logW)
         #ESS = 1./np.sum(W**2)/N
 
+        # start_smc = timeit.default_timer()
         for t in range(self.num_steps):
             # Resampling
             # Shape of x_prev (num_particles,latent_dim)
             if t > 0:
                 ancestors = self.resampling(logw_tilde)
-                x_prev = tf.gather(x_curr[t-1,:,:],ancestors,axis=0) #TODO: this indexing won't work - just for prototyping
+                x_prev = tf.gather(x_curr,ancestors,axis=0) #TODO: this indexing won't work - just for prototyping
             else:
                 x_prev = x_curr[0,:,:]
 
@@ -309,90 +325,101 @@ class VCSLAM():
             # This simulates one transition from the proposal distribution
             # Shape of x_curr (num_particles,latent_dim)
             # TODO: Revisit the arguments when you implement the class with the proposal and couplas
-            x_curr[t,:,:] = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params, model_params)
+            x_curr = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
 
             # Weighting
             # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
-            logw_tilde = vcs_obj.log_weights(t, x_curr[t,:,:], x_prev, self.observ, prop_params, model_params)
+            logw_tilde = vcs_obj.log_weights(t, x_curr, x_prev, self.observ, prop_params)
+            # print(logw_tilde)
             max_logw_tilde = tf.math.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
-            logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - self.log_num_particles + max_logw_tilde
+            logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
+
+            # Not sure if this is correct at all - Kevin
+            W = tf.exp(logw_tilde_adj)
+            W /= tf.reduce_sum(W)
+            logW = tf.log(W)
 
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
+        # print("SMC time: ", (timeit.default_timer() - start_smc))
         # Sample from the empirical approximation
+        # print("LogW tilde: ", logw_tilde)
+        # start_sample_traj = timeit.default_timer()
         B = self.sample_traj(logw_tilde)
+        # print("Sample traj time: ", (timeit.default_timer() - start_sample_traj))
+        # B = self.sample_traj(logW)
+        # print("B: ", B)
         return tf.gather(x_curr,B,axis=0)
+        # return x_curr, B
 
     def train(self,vcs_agent):
         """
         Creates the top-level computation graph for training
         """
-        tf.reset_default_graph()
-        initializer = tf.contrib.layers.xavier_initializer()
+        print("Starting training")
+        # tf.reset_default_graph()
+        # initializer = tf.contrib.layers.xavier_initializer()
+        dependency_initializer = tf.contrib.layers.xavier_initializer()
+        # marginal_initializer = tf.constant_initializer()
+        marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
 
         # Initialize the parameters
-        dependency_params = tf.get_variable( "theta",
-                                            dtype=tf.float32,
-                                            shape=vcs_agent.get_dependency_param_shape(),
-                                            initializer=initializer)
+        if vcs_agent.get_dependency_param_shape() == 0:
+            dependency_params = []
+        else:
+            dependency_params = tf.get_variable( "theta",
+                                                dtype=tf.float32,
+                                                shape=vcs_agent.get_dependency_param_shape(),
+                                                initializer=dependency_initializer)
         marginal_params   = tf.get_variable( "eta",
                                             dtype=tf.float32,
                                             shape=vcs_agent.get_marginal_param_shape(),
-                                            initializer=initializer)
+                                            initializer=marginal_initializer)
+        print("Marginal params shape", marginal_params.shape)
         proposal_params = [dependency_params,marginal_params]
+        print("Length of proposal params", len(proposal_params))
         # Compute losses and define the learning procedures
-        loss = self.vsmc_lower_bound(vcs_agent,proposal_params)
+        loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
 
-        learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
+        # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
         learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
 
         # Start the session
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
+        print("Original marginal_params:\n", marginal_params.eval(session=sess))
 
         # Top-level training loop
         # TODO: add logging for loss terms
+        iter_display = 100
+        print("    Iter    |    ELBO    ")
         for it in range(self.num_train_steps):
 
             # Train the dependency model
-            _, loss_curr = sess.run([learn_dependency, loss])
+            # _, loss_curr = sess.run([learn_dependency, loss])
 
-            if np.isnan(loss_curr):
-                print("NAN loss:", it)
-                break
+            # if np.isnan(loss_curr):
+            #     print("NAN loss:", it)
+            #     break
 
-            dep_losses[it] = loss_curr
+            # dep_losses[it] = loss_curr
 
             # Train the marginal model
             _, loss_curr = sess.run([learn_marginal, loss])
 
             if np.isnan(loss_curr):
                 print("NAN loss:", it)
+                # Break everything if the loss goes to NaN
+                return None
                 break
 
-            mar_losses[it] = loss_curr
+            # mar_losses[it] = loss_curr
 
             if it % iter_display == 0:
-                print("Need to show plots")
-
-
-
-# Instantiate the VC-SLAM agent, which includes a target and a proposal dist
-# TODO: Implement this class with the test problem we consider, along with associated methods
-# vcs_agent = VCSLAMAgent()
-vcs_agent = VCSLAMAgent(num_steps=1, state_dim=1, num_landmarks=2, landmark_dim=1, latent_dim=3, observ_dim=1)
-
-# Simulate the system to obtain a sequence of observations
-observ = vcs_agent.sim_target()
-
-# Instantiate the VC-SLAM procedure
-vcs = VCSLAM(vcs_agent = vcs_agent , observ = observ , num_particles = 10)
-
-# Train the approximate model
-vcs.train(vcs_agent = vcs_agent)
-
-# Output the SLAM solution
-#vcs_solution = vcs.sim_q()
+                message = "{:15}|{!s:20}".format(it, -loss_curr)
+                print(message)
+        print("Final marginal params:\n", marginal_params.eval(session=sess))
+        return proposal_params, sess

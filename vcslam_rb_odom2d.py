@@ -3,7 +3,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import seaborn as sbs
-from vcsmc_marginal_only import *
+from vcsmc import *
 from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 
@@ -256,6 +256,8 @@ if __name__ == '__main__':
                      C,
                      R]
     td_agent = RangeBearingAgent(target_params=target_params, rs=agent_rs, num_steps=num_steps)
+   
+    print("Generating data")
     x_true, z_true = td_agent.generate_data()
     sess = tf.Session()
     xt_vals, zt_vals = sess.run([x_true, z_true])
@@ -334,7 +336,6 @@ if __name__ == '__main__':
     # gen_sample_values = np.array([sess.run([td_agent.generate_data()[0]]) for i in range(num_samps)]).reshape(num_samps, td_agent.state_dim)
     # gen_vars = [td_agent.generate_data()[0] for i in range(num_samps)]
     # gen_sample_values = np.array(sess.run(gen_vars)).reshape(num_samps, td_agent.state_dim)
-
     # print(gen_sample_values.shape)
     print(xt_vals)
     zt_vals = np.array(zt_vals)

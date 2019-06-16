@@ -14,3 +14,5 @@ def plot_dist(ref,est):
     plt.figure()
     sbs.distplot(ref[:,1], color='blue')
     sbs.distplot(est[:,1], color='green')
+    plt.savefig("dist")
+    plt.show()

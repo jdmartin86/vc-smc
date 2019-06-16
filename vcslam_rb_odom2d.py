@@ -242,7 +242,7 @@ if __name__ == '__main__':
     # Learning rate for the distribution
     lr_m = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 1
+    num_seeds = 2
     # Number of samples to use for plotting
     num_samps = 10000
 

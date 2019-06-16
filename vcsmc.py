@@ -225,58 +225,59 @@ class VCSLAM():
         marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
 
         # Initialize the parameters
-        if vcs_agent.get_dependency_param_shape() == 0:
-            dependency_params = []
-        else:
-            dependency_params = tf.get_variable( "theta",
+        with tf.variable_scope("vcsmc", reuse=tf.AUTO_REUSE):
+            if vcs_agent.get_dependency_param_shape() == 0:
+                dependency_params = []
+            else:
+                dependency_params = tf.get_variable( "theta",
+                                                    dtype=tf.float32,
+                                                    shape=vcs_agent.get_dependency_param_shape(),
+                                                    initializer=dependency_initializer)
+            marginal_params   = tf.get_variable( "eta",
                                                 dtype=tf.float32,
-                                                shape=vcs_agent.get_dependency_param_shape(),
-                                                initializer=dependency_initializer)
-        marginal_params   = tf.get_variable( "eta",
-                                            dtype=tf.float32,
-                                            shape=vcs_agent.get_marginal_param_shape(),
-                                            initializer=marginal_initializer)
-        #print("Marginal params shape", marginal_params.shape)
-        proposal_params = [dependency_params,marginal_params]
+                                                shape=vcs_agent.get_marginal_param_shape(),
+                                                initializer=marginal_initializer)
+            #print("Marginal params shape", marginal_params.shape)
+            proposal_params = [dependency_params,marginal_params]
 
-        # Compute losses and define the learning procedures
-        loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
+            # Compute losses and define the learning procedures
+            loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
 
-        # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
-        learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
+            # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
+            learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
 
-        # Start the session
-        self.sess.run(tf.global_variables_initializer())
-        print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
+            # Start the session
+            self.sess.run(tf.global_variables_initializer())
+            print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
 
-        # Top-level training loop
-        # TODO: add logging for loss terms
-        iter_display = 100
-        print("    Iter    |    ELBO    ")
-        for it in range(self.num_train_steps):
+            # Top-level training loop
+            # TODO: add logging for loss terms
+            iter_display = 100
+            print("    Iter    |    ELBO    ")
+            for it in range(self.num_train_steps):
 
-            # Train the dependency model
-            # _, loss_curr = sess.run([learn_dependency, loss])
+                # Train the dependency model
+                # _, loss_curr = sess.run([learn_dependency, loss])
 
-            # if np.isnan(loss_curr):
-            #     print("NAN loss:", it)
-            #     break
+                # if np.isnan(loss_curr):
+                #     print("NAN loss:", it)
+                #     break
 
-            # dep_losses[it] = loss_curr
+                # dep_losses[it] = loss_curr
 
-            # Train the marginal model
-            _, loss_curr = self.sess.run([learn_marginal, loss])
+                # Train the marginal model
+                _, loss_curr = self.sess.run([learn_marginal, loss])
 
-            if np.isnan(loss_curr):
-                print("NAN loss:", it)
-                # Break everything if the loss goes to NaN
-                return None
-                break
+                if np.isnan(loss_curr):
+                    print("NAN loss:", it)
+                    # Break everything if the loss goes to NaN
+                    return None
+                    break
 
-            # mar_losses[it] = loss_curr
+                # mar_losses[it] = loss_curr
 
-            if it % iter_display == 0:
-                message = "{:15}|{!s:20}".format(it, -loss_curr)
-                print(message)
-        print("Final marginal params:\n", marginal_params.eval(session=self.sess))
+                if it % iter_display == 0:
+                    message = "{:15}|{!s:20}".format(it, -loss_curr)
+                    print(message)
+            print("Final marginal params:\n", marginal_params.eval(session=self.sess))
         return proposal_params, self.sess

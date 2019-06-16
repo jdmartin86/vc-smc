@@ -380,7 +380,7 @@ class VCSLAM():
                                             initializer=marginal_initializer)
         #print("Marginal params shape", marginal_params.shape)
         proposal_params = [dependency_params,marginal_params]
-        
+
         # Compute losses and define the learning procedures
         loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
 

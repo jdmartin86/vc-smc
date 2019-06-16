@@ -179,9 +179,9 @@ class RangeBearingAgent(VCSLAMAgent):
         Prec = tf.dtypes.cast(tf.linalg.inv(Sigma), dtype=tf.float32)
         # print(mu)
         # print(mu.get_shape().as_list()[0])
-        first_term = x - tf.transpose(mu)
+        first_term = x - mu
         # print(first_term.get_shape().as_list())
-        second_term = tf.transpose(tf.matmul(Prec, tf.transpose(x-tf.transpose(mu))))
+        second_term = tf.transpose(tf.matmul(Prec, tf.transpose(x-mu)))
         ls_term = -0.5*tf.reduce_sum(first_term*second_term,1)
         # print(ls_term.get_shape().as_list())
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
@@ -193,10 +193,10 @@ class RangeBearingAgent(VCSLAMAgent):
     def log_target(self, t, x_curr, x_prev, observ):
         init_pose, init_cov, A, Q, C, R = self.target_params
         if t > 0:
-            logF = self.log_normal(x_curr, tf.matmul(A, tf.transpose(x_prev)), Q)
+            logF = self.log_normal(x_curr, tf.transpose(tf.matmul(A, tf.transpose(x_prev))), Q)
         else:
-            logF = self.log_normal(x_curr, init_pose, init_cov)
-        logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.convert_to_tensor(observ[t], dtype=tf.float32), R)
+            logF = self.log_normal(x_curr, tf.transpose(init_pose), init_cov)
+        logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.transpose(tf.convert_to_tensor(observ[t], dtype=tf.float32)), R)
         return logF + logG
 
     def log_proposal_marginal(self, t, x_curr, x_prev, observ, proposal_params):
@@ -207,9 +207,9 @@ class RangeBearingAgent(VCSLAMAgent):
         log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
-            mu = tf.transpose(mut + tf.transpose(tf.matmul(A, tf.transpose(x_prev))))
+            mu = mut + lint*tf.transpose(tf.matmul(A, tf.transpose(x_prev)))
         else:
-            mu = tf.transpose(mut + lint*tf.transpose(init_pose))
+            mu = mut + lint*tf.transpose(init_pose)
         return self.log_normal(x_curr, mu, tf.diag(s2t))
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
@@ -237,7 +237,7 @@ if __name__ == '__main__':
     # Number of particles to use
     num_particles = 100
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 1000
+    num_train_steps = 10000
     # Learning rate for the distribution
     lr_m = 0.001
     num_seeds = 1

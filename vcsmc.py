@@ -10,6 +10,7 @@ class VCSLAM():
     a sampling method for the learned proposal.
     """
     def __init__(self,
+                sess,
                 vcs_agent,
                 observ,
                 num_particles,
@@ -18,8 +19,9 @@ class VCSLAM():
                 lr_m = 0.0001,
                 adapt_resamp = False,
                 summary_writer=None,
-                summary_writing_frequency=500,
-                rs=np.random.RandomState(0)):
+                summary_writing_frequency=500):
+        # TF Session
+        self.sess = sess
         # VC-SLAM agent
         self.vcs_agent = vcs_agent
         # Number of time steps on the horizon
@@ -56,8 +58,6 @@ class VCSLAM():
         # Cached constant: the logarithm of the number of particles
         self.log_num_particles = tf.log(tf.to_float(self.num_particles))
 
-        self.rs = rs
-
     def resampling(self, log_weights):
         """
         Stratified resampling
@@ -72,7 +72,7 @@ class VCSLAM():
         # log_weights = tf.gather(self.logw,t,axis=1)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         ancestors = tf.stop_gradient(
-            resampling_dist.sample(sample_shape=(self.num_particles),seed=self.rs.randint(0,1234)))
+            resampling_dist.sample(sample_shape=(self.num_particles)))
         return ancestors
 
     def sample_traj(self, log_weights):
@@ -86,7 +86,7 @@ class VCSLAM():
         # print("shape of log weights? ", log_weights)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         # print(log_weights)
-        samp = resampling_dist.sample(seed=self.rs.randint(0,1234))
+        samp = resampling_dist.sample()
         return samp
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
@@ -101,7 +101,6 @@ class VCSLAM():
             \mathbb{E}_{\phi}\left[\nabla_\lambda \log \hat p(y_{1:T}) \right]
 
         """
-
         # Initialize SMC
         x_curr = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
         x_prev = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
@@ -222,10 +221,7 @@ class VCSLAM():
         Creates the top-level computation graph for training
         """
         print("Starting training")
-        # tf.reset_default_graph()
-        # initializer = tf.contrib.layers.xavier_initializer()
         dependency_initializer = tf.contrib.layers.xavier_initializer()
-        # marginal_initializer = tf.constant_initializer()
         marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
 
         # Initialize the parameters
@@ -250,9 +246,8 @@ class VCSLAM():
         learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
 
         # Start the session
-        sess = tf.Session()
-        sess.run(tf.global_variables_initializer())
-        print("Original marginal_params:\n", marginal_params.eval(session=sess))
+        self.sess.run(tf.global_variables_initializer())
+        print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
 
         # Top-level training loop
         # TODO: add logging for loss terms
@@ -270,7 +265,7 @@ class VCSLAM():
             # dep_losses[it] = loss_curr
 
             # Train the marginal model
-            _, loss_curr = sess.run([learn_marginal, loss])
+            _, loss_curr = self.sess.run([learn_marginal, loss])
 
             if np.isnan(loss_curr):
                 print("NAN loss:", it)
@@ -283,5 +278,5 @@ class VCSLAM():
             if it % iter_display == 0:
                 message = "{:15}|{!s:20}".format(it, -loss_curr)
                 print(message)
-        print("Final marginal params:\n", marginal_params.eval(session=sess))
-        return proposal_params, sess
+        print("Final marginal params:\n", marginal_params.eval(session=self.sess))
+        return proposal_params, self.sess

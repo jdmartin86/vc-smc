@@ -273,18 +273,15 @@ if __name__ == '__main__':
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
 
     for seed in range(num_seeds):
-        # Set random seeds
-        #np.random.seed(1)
-        tf.random.set_random_seed(1)
-        rs = np.random.RandomState(seed)
+        tf.set_random_seed(seed)
 
         # Create the VCSLAM instance with above parameters
-        vcs = VCSLAM(vcs_agent = td_agent,
+        vcs = VCSLAM(sess = sess,
+                    vcs_agent = td_agent,
                     observ = zt_vals,
                     num_particles = num_particles,
                     num_train_steps = num_train_steps,
-                    lr_m = lr_m,
-                    rs = rs)
+                    lr_m = lr_m)
 
         # Train the model
         opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)
@@ -294,7 +291,7 @@ if __name__ == '__main__':
         my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)
         my_samples = [train_sess.run(my_vars) for i in range(num_samps)] #TODO: sample w/ replacement from one dist
         samples_np = np.array(my_samples)
-        # samples_np = samples_np.reshape(num_samps, td_agent.state_dim)
+        plotting.plot_dist(samples_np,post_values)
 
     # plots TODO: clean up more and add other relevant plots
     xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)

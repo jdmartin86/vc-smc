@@ -4,7 +4,7 @@ from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 
 # TODO: consolidate plotting routines
-#import plotting
+import plotting
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import seaborn as sbs
@@ -262,16 +262,26 @@ if __name__ == '__main__':
 
     sess = tf.Session()
 
+    # Create the agent 
+    rs = np.random.RandomState(1)# This remains fixed for the ground truth
+    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps)
+
+    # Generate observations TODO: change to numpy implementation
+    x_true, z_true = td_agent.generate_data()
+    xt_vals, zt_vals = sess.run([x_true, z_true]) 
+
+    # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
+    # TODO: change to numpy implementation
+    post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
+    p_mu, p_cov = sess.run([post_mean, post_cov])
+    post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
+    post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
+
     for seed in range(num_seeds):
         # Set random seeds
         #np.random.seed(1)
         tf.random.set_random_seed(1)
         rs = np.random.RandomState(seed)
-
-        # Create an agent for observations
-        td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps)
-        x_true, z_true = td_agent.generate_data()
-        xt_vals, zt_vals = sess.run([x_true, z_true]) # JM: What does this do?
 
         # Create the VCSLAM instance with above parameters
         vcs = VCSLAM(vcs_agent = td_agent,
@@ -281,43 +291,20 @@ if __name__ == '__main__':
                     lr_m = lr_m,
                     rs = rs)
 
-    # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
-    post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
+        # Train the model
+        opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)
+        opt_propsal_params = train_sess.run(opt_propsal_params)
 
-    # post_samples = tfd.MultivariateNormalFullCovariance(loc=tf.transpose(post_mean),
-    #                                                     covariance_matrix=post_cov).sample(sample_shape = num_samps, seed = td_agent.rs.randint(0,1234))
-    # post_values = sess.run([post_samples])
-    p_mu, p_cov = sess.run([post_mean, post_cov])
-    post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
-    post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
+        # Sample the model
+        my_vars = [vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)]
+        my_samples = [train_sess.run(my_vars) for i in range(num_samps)] #TODO: sample w/ replacement from one dist
+        samples_np = np.array(my_samples).reshape(num_samps, td_agent.state_dim)
 
-    sbs.kdeplot(post_values[:,0], post_values[:,1], color='green')
-
-    opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)
-    opt_propsal_params = train_sess.run(opt_propsal_params)
-    my_vars = [vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)]
-    my_samples = [train_sess.run(my_vars) for i in range(num_samps)]
-    samples_np = np.array(my_samples).reshape(num_samps, td_agent.state_dim)
-    # plt.scatter(samples_np[:,0], samples_np[:,1], color='blue')
-    sbs.kdeplot(samples_np[:,0], samples_np[:,1], color='blue')
-
+    # plots TODO: clean up more and add other relevant plots
     xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-    # gen_sample_values = np.array([sess.run([td_agent.generate_data()[0]]) for i in range(num_samps)]).reshape(num_samps, td_agent.state_dim)
-    # gen_vars = [td_agent.generate_data()[0] for i in range(num_samps)]
-    # gen_sample_values = np.array(sess.run(gen_vars)).reshape(num_samps, td_agent.state_dim)
-    # print(gen_sample_values.shape)
     zt_vals = np.array(zt_vals)
-    plt.scatter(xt_vals[0,0], xt_vals[0,1], color='red')
-    plt.scatter(xt_vals[1,0], xt_vals[1,1], color='orange')
-    plt.figure()
-    sbs.kdeplot(samples_np[:,1],samples_np[:,2],color='blue')
-    sbs.kdeplot(post_values[:,1],post_values[:,2], color='green')
-    plt.figure()
-    sbs.distplot(samples_np[:,1], color='blue')
-    sbs.distplot(post_values[:,1], color='green')
-    # plt.scatter(zt_vals[:,0], zt_vals[:,1], color='green')
-    # sbs.kdeplot(gen_sample_values[:,0], gen_sample_values[:,1], color='red')
-    # plt.scatter(gen_sample_values[:,0], gen_sample_values[:,1], color='black')
+    plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
+    plotting.plot_dist(samples_np,post_values)
 
     plt.show()
 

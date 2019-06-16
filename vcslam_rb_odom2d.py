@@ -207,7 +207,7 @@ class RangeBearingAgent(VCSLAMAgent):
         log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
-            mu = mut + tf.matmul(A, x_prev)
+            mu = tf.transpose(mut + tf.transpose(tf.matmul(A, tf.transpose(x_prev))))
         else:
             mu = tf.transpose(mut + lint*tf.transpose(init_pose))
         return self.log_normal(x_curr, mu, tf.diag(s2t))
@@ -232,10 +232,8 @@ if __name__ == '__main__':
     # Optionally use accelerated computation
     # with tf.device("/device:XLA_CPU:0"):
 
-    
-
     # Number of steps for the trajectory
-    num_steps = 1
+    num_steps = 2
     # Number of particles to use
     num_particles = 100
     # Number of iterations to fit the proposal parameters
@@ -261,12 +259,11 @@ if __name__ == '__main__':
                      C,
                      R]
 
-  
 
     sess = tf.Session()
 
     for seed in range(num_seeds):
-        # Set random seeds     
+        # Set random seeds
         #np.random.seed(1)
         tf.random.set_random_seed(1)
         rs = np.random.RandomState(seed)
@@ -293,7 +290,6 @@ if __name__ == '__main__':
     p_mu, p_cov = sess.run([post_mean, post_cov])
     post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
-    
 
     sbs.kdeplot(post_values[:,0], post_values[:,1], color='green')
 
@@ -311,7 +307,8 @@ if __name__ == '__main__':
     # gen_sample_values = np.array(sess.run(gen_vars)).reshape(num_samps, td_agent.state_dim)
     # print(gen_sample_values.shape)
     zt_vals = np.array(zt_vals)
-    plt.scatter(xt_vals[:,0], xt_vals[:,1], color='red')
+    plt.scatter(xt_vals[0,0], xt_vals[0,1], color='red')
+    plt.scatter(xt_vals[1,0], xt_vals[1,1], color='orange')
     plt.figure()
     sbs.kdeplot(samples_np[:,1],samples_np[:,2],color='blue')
     sbs.kdeplot(post_values[:,1],post_values[:,2], color='green')

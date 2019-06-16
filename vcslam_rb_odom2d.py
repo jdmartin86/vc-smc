@@ -141,7 +141,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             S = tf.matmul(C, tf.matmul(Ppred, tf.transpose(C))) + R
             K = tf.transpose(tf.linalg.solve(S, tf.matmul(C, Ppred)))
             xfilt = xpred + tf.matmul(K,yt)
-            Pfilt = Ppred + tf.matmul(K, tf.matmul(C,Ppred))
+            Pfilt = Ppred - tf.matmul(K, tf.matmul(C,Ppred))
         return xfilt, Pfilt
 
     # def sim_target(self, t, x_curr, x_prev, observ)
@@ -208,7 +208,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
-            mu = mut + lint*tf.transpose(tf.matmul(A, tf.transpose(x_prev)))
+            mu = mut + tf.transpose(tf.matmul(A, tf.transpose(x_prev)))*lint
         else:
             mu = mut + lint*tf.transpose(init_pose)
         return self.log_normal(x_curr, mu, tf.diag(s2t))
@@ -257,13 +257,13 @@ if __name__ == '__main__':
     # Create the session
     sess = tf.Session()
 
-    # Create the agent 
+    # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
     td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps)
 
     # Generate observations TODO: change to numpy implementation
     x_true, z_true = td_agent.generate_data()
-    xt_vals, zt_vals = sess.run([x_true, z_true]) 
+    xt_vals, zt_vals = sess.run([x_true, z_true])
 
     # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
     # TODO: change to numpy implementation
@@ -291,14 +291,15 @@ if __name__ == '__main__':
         opt_propsal_params = train_sess.run(opt_propsal_params)
 
         # Sample the model
-        my_vars = [vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)]
+        my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)
         my_samples = [train_sess.run(my_vars) for i in range(num_samps)] #TODO: sample w/ replacement from one dist
-        samples_np = np.array(my_samples).reshape(num_samps, td_agent.state_dim)
+        samples_np = np.array(my_samples)
+        # samples_np = samples_np.reshape(num_samps, td_agent.state_dim)
 
     # plots TODO: clean up more and add other relevant plots
-    #xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-    #zt_vals = np.array(zt_vals)
-    #plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
-    #plotting.plot_dist(samples_np,post_values)
-    #plt.show()
+    xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
+    zt_vals = np.array(zt_vals)
+    plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
+    plotting.plot_dist(samples_np,post_values)
+    plt.show()
 

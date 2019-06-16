@@ -83,11 +83,8 @@ class VCSLAM():
         Returns:
             index: An ancenstral index
         """
-        # print("shape of log weights? ", log_weights)
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
-        # print(log_weights)
-        samp = resampling_dist.sample()
-        return samp
+        return resampling_dist.sample()
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
         """
@@ -150,7 +147,7 @@ class VCSLAM():
         # print("Train SMC Time: ", (timeit.default_timer() - start_smc))
         return logZ
 
-    def sim_q(self, prop_params, model_params, y, vcs_obj):
+    def sim_q(self, prop_params, model_params, y, vcs_obj, num_samples=1):
         """
         Simulates a single sample from the VSMC approximation.
         This returns the SLAM solution
@@ -209,11 +206,15 @@ class VCSLAM():
         # Sample from the empirical approximation
         # print("LogW tilde: ", logw_tilde)
         # start_sample_traj = timeit.default_timer()
-        B = self.sample_traj(logw_tilde)
+        # NOTE: this loop is slow
+        trajs = []
+        for n in range(num_samples):
+            B = self.sample_traj(logw_tilde)
+            trajs.append(tf.gather(x_curr,B,axis=0))
         # print("Sample traj time: ", (timeit.default_timer() - start_sample_traj))
         # B = self.sample_traj(logW)
         # print("B: ", B)
-        return tf.gather(x_curr,B,axis=0)
+        return trajs
         # return x_curr, B
 
     def train(self,vcs_agent):

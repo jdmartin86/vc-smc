@@ -242,9 +242,9 @@ if __name__ == '__main__':
     # Learning rate for the distribution
     lr_m = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 2
+    num_seeds = 1
     # Number of samples to use for plotting
-    num_samps = 10000
+    num_samps = 500
 
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
@@ -291,8 +291,8 @@ if __name__ == '__main__':
         opt_propsal_params = train_sess.run(opt_propsal_params)
 
         # Sample the model
-        my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent)
-        my_samples = [train_sess.run(my_vars) for i in range(num_samps)] #TODO: sample w/ replacement from one dist
+        my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=num_samps)
+        my_samples = train_sess.run(my_vars)
         samples_np = np.array(my_samples)
         plotting.plot_dist(samples_np,post_values)
 

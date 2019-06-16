@@ -273,10 +273,7 @@ if __name__ == '__main__':
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
 
     for seed in range(num_seeds):
-        # Set random seeds
-        #np.random.seed(1)
-        tf.random.set_random_seed(1)
-        rs = np.random.RandomState(seed)
+        tf.set_random_seed(seed)
 
         # Create the VCSLAM instance with above parameters
         vcs = VCSLAM(sess = sess,
@@ -284,8 +281,7 @@ if __name__ == '__main__':
                     observ = zt_vals,
                     num_particles = num_particles,
                     num_train_steps = num_train_steps,
-                    lr_m = lr_m,
-                    seed = seed)
+                    lr_m = lr_m)
 
         # Train the model
         opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)

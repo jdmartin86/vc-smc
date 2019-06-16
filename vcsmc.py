@@ -19,8 +19,7 @@ class VCSLAM():
                 lr_m = 0.0001,
                 adapt_resamp = False,
                 summary_writer=None,
-                summary_writing_frequency=500,
-                seed=0):
+                summary_writing_frequency=500):
         # TF Session
         self.sess = sess
         # VC-SLAM agent
@@ -102,7 +101,6 @@ class VCSLAM():
             \mathbb{E}_{\phi}\left[\nabla_\lambda \log \hat p(y_{1:T}) \right]
 
         """
-
         # Initialize SMC
         x_curr = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
         x_prev = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))

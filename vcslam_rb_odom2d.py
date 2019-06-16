@@ -14,6 +14,7 @@ import vcslam_agent
 
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
+tf.reset_default_graph()
 
 class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
     def __init__(self,
@@ -240,6 +241,7 @@ if __name__ == '__main__':
     num_train_steps = 1000
     # Learning rate for the distribution
     lr_m = 0.001
+    # Number of random seeds for experimental trials
     num_seeds = 1
     # Number of samples to use for plotting
     num_samps = 10000
@@ -273,6 +275,7 @@ if __name__ == '__main__':
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
 
     for seed in range(num_seeds):
+        sess = tf.Session()
         tf.set_random_seed(seed)
 
         # Create the VCSLAM instance with above parameters
@@ -292,6 +295,7 @@ if __name__ == '__main__':
         my_samples = [train_sess.run(my_vars) for i in range(num_samps)] #TODO: sample w/ replacement from one dist
         samples_np = np.array(my_samples).reshape(num_samps, td_agent.state_dim)
         plotting.plot_dist(samples_np,post_values)
+
     # plots TODO: clean up more and add other relevant plots
     #xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
     #zt_vals = np.array(zt_vals)

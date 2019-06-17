@@ -58,6 +58,10 @@ class VCSLAM():
         # Cached constant: the logarithm of the number of particles
         self.log_num_particles = tf.log(tf.to_float(self.num_particles))
 
+        # Tensorboard summary writer and log frequency
+        self.summary_writer = summary_writer
+        self.summary_writing_frequency = summary_writing_frequency
+
     def resampling(self, log_weights, num_particles=None):
         """
         Stratified resampling
@@ -251,6 +255,9 @@ class VCSLAM():
 
             # Compute losses and define the learning procedures
             loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
+            loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(-loss))
+            summary_op = tf.summary.merge_all()
+            # elbo = -loss
 
             # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
             learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
@@ -275,8 +282,9 @@ class VCSLAM():
                 # dep_losses[it] = loss_curr
 
                 # Train the marginal model
-                _, loss_curr = self.sess.run([learn_marginal, loss])
-
+                _, loss_curr, summary_str = self.sess.run([learn_marginal, loss, summary_op])
+                # elbo = -loss_curr
+                self.summary_writer.add_summary(summary_str, it)
                 if np.isnan(loss_curr):
                     print("NAN loss:", it)
                     # Break everything if the loss goes to NaN

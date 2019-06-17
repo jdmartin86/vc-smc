@@ -82,47 +82,16 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             else:
                 x_sample = tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(init_pose),
                                                                    covariance_matrix=init_cov).sample(seed=self.rs.randint(0,1234)))
+                x_sample = init_pose
                 x_true.append(x_sample)
-                # x_true.append(tfd.MultivariateNormalFullCovariance(loc=init_pose,
-                #                                                    covariance_matrix=init_cov).sample(seed=self.rs.randint(0,1234)))
             z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(tf.matmul(C,x_true[t])),
                                                                covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
         return x_true, z_true
-
-    # def log_marginal_likelihood(self, observ):
-    #     """
-    #         Completely untested
-    #     """
-    #     init_pose, init_cov, A, Q, C, R = self.target_params
-    #     Dx = init_pose.get_shape().as_list()[0]
-    #     Dy = R.get_shape().as_list()[0]
-    #     log_likelihood = 0.0
-    #     xfilt = tf.zeros(Dx)
-    #     Pfilt = tf.zeros([Dx, Dx])
-    #     xpred = init_pose
-    #     Ppred = init_cov
-    #     for t in range(self.num_steps):
-    #         if t > 0:
-    #             # Predict Step
-    #             xpred = tf.matmul(A, xfilt)
-    #             Ppred = tf.matmul(A, tf.matmul(Pfilt, tf.transpose(A))) + Q
-    #         # Update step
-    #         yt = observ[t,:] - tf.matmul(C, xpred)
-    #         S = tf.matmul(C, tf.matmul(Ppred, tf.transpose(C))) + R
-    #         K = tf.transpose(tf.linalg.solve(S, tf.matmul(C, Ppred)))
-    #         xfilt = xpred + tf.matmul(K,yt)
-    #         Pfilt = Ppred + tf.matmul(K, tf.matmul(C,Ppred))
-    #         sign, logdet = tf.linalg.slogdet(S)
-    #         log_likelihood += -0.5*(tf.reduce_sum(yt*tf.linalg.solve(S,yt))) + logdet + Dy*tf.log(2.*np.pi)
-    #     return log_likelihood
-
 
     def lgss_posterior_params(self, observ, T):
         """
             Apply a Kalman filter to the linear Gaussian state space model
             Returns p(x_T | z_{1:T}) when supplied with z's and T
-            Completely untested
-            I'm a little worried this is wrong
         """
         init_pose, init_cov, A, Q, C, R = self.target_params
         Dx = init_pose.get_shape().as_list()[0]
@@ -144,16 +113,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             xfilt = xpred + tf.matmul(K,yt)
             Pfilt = Ppred - tf.matmul(K, tf.matmul(C,Ppred))
         return xfilt, Pfilt
-
-    # def sim_target(self, t, x_curr, x_prev, observ)
-    #     init_pose, init_cov, A, Q, C, R = self.target_params
-    #     if t > 0:
-    #         logF = self.log_normal(x_curr, tf.matmul(A, x_prev), Q)
-    #     else:
-    #         logF = self.log_normal(x_curr, init_pose, init_cov)
-    #     logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.convert_to_tensor(observ[t], dtype=tf.float32), R)
-    #     return logF + logG
-
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -234,28 +193,31 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 2
+    num_steps = 20
     # Number of particles to use during training
     num_train_particles = 1000
     # Number of particles to use during SMC query
     num_query_particles = 10000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 1000
+    num_train_steps = 5000
     # Learning rate for the distribution
     lr_m = 0.001
     # Number of random seeds for experimental trials
     num_seeds = 1
     # Number of samples to use for plotting
     num_samps = 10000
+    # Proposal initial scale
+    prop_scale = 0.1
+
 
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
-    init_pose = tf.zeros([3,1],dtype=np.float32)
-    init_cov = tf.eye(3,3,dtype=np.float32)
+    init_pose = tf.ones([3,1],dtype=np.float32)
+    init_cov = 0.01*tf.eye(3,3,dtype=np.float32)
     A = 1.1*tf.eye(3,3,dtype=np.float32)
-    Q = 0.5*tf.eye(3,3,dtype=np.float32)
+    Q = 0.01*tf.eye(3,3,dtype=np.float32)
     C = tf.eye(2,3,dtype=np.float32)
-    R = tf.eye(2,2,dtype=np.float32)
+    R = 0.01*tf.eye(2,2,dtype=np.float32)
     target_params = [init_pose,init_cov,A,Q,C,R]
 
     # Create the session
@@ -263,7 +225,7 @@ if __name__ == '__main__':
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
-    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps)
+    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale)
 
     # Generate observations TODO: change to numpy implementation
     x_true, z_true = td_agent.generate_data()
@@ -280,13 +242,17 @@ if __name__ == '__main__':
         sess = tf.Session()
         tf.set_random_seed(seed)
 
+        # Summary writer
+        writer = tf.summary.FileWriter('./logs', sess.graph)
+
         # Create the VCSLAM instance with above parameters
         vcs = VCSLAM(sess = sess,
-                    vcs_agent = td_agent,
-                    observ = zt_vals,
-                    num_particles = num_train_particles,
-                    num_train_steps = num_train_steps,
-                    lr_m = lr_m)
+                     vcs_agent = td_agent,
+                     observ = zt_vals,
+                     num_particles = num_train_particles,
+                     num_train_steps = num_train_steps,
+                     lr_m = lr_m,
+                     summary_writer = writer)
 
         # Train the model
         opt_propsal_params, train_sess = vcs.train(vcs_agent = td_agent)
@@ -299,10 +265,10 @@ if __name__ == '__main__':
         print(samples_np.shape)
         plotting.plot_dist(samples_np,post_values)
 
-    # plots TODO: clean up more and add other relevant plots
-    xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-    zt_vals = np.array(zt_vals)
-    plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
-    plotting.plot_dist(samples_np,post_values)
-    plt.show()
+        # plots TODO: clean up more and add other relevant plots
+        xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
+        zt_vals = np.array(zt_vals)
+        plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
+        plotting.plot_dist(samples_np,post_values)
+        plt.show()
 

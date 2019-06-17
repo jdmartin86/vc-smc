@@ -16,7 +16,7 @@ def plot_true(xt_vals, padding=5.0):
 
 def plot_kde(ref,est,xt_vals,zt_vals, padding=5.0):
     plt.figure()
-    sbs.kdeplot(ref[:,0], ref[:,1], color='blue')
+    sbs.kdeplot(ref[:,0], ref[:,1], color='blue', bw='scott')
     # sbs.kdeplot(est[:,0], est[:,1], color='green')
 
     plt.scatter(xt_vals[0,0], xt_vals[0,1], color='red')

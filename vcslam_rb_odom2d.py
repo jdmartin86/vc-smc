@@ -193,13 +193,13 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 20
+    num_steps = 50
     # Number of particles to use during training
     num_train_particles = 1000
     # Number of particles to use during SMC query
-    num_query_particles = 10000
+    num_query_particles = 1000000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 5000
+    num_train_steps = 1000
     # Learning rate for the distribution
     lr_m = 0.001
     # Number of random seeds for experimental trials
@@ -207,7 +207,7 @@ if __name__ == '__main__':
     # Number of samples to use for plotting
     num_samps = 10000
     # Proposal initial scale
-    prop_scale = 0.1
+    prop_scale = -0.01
 
 
     # True target parameters
@@ -260,6 +260,9 @@ if __name__ == '__main__':
 
         # Sample the model
         my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
+        # temporary
+        # my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=1, num_particles=num_query_particles)
+        # my_samples = [train_sess.run(my_vars) for i in range(num_samps)]
         my_samples = train_sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
         print(samples_np.shape)

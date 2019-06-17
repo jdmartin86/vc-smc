@@ -234,9 +234,11 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 1
-    # Number of particles to use
-    num_particles = 100
+    num_steps = 2
+    # Number of particles to use during training
+    num_train_particles = 1000
+    # Number of particles to use during SMC query
+    num_query_particles = 10000
     # Number of iterations to fit the proposal parameters
     num_train_steps = 1000
     # Learning rate for the distribution
@@ -244,7 +246,7 @@ if __name__ == '__main__':
     # Number of random seeds for experimental trials
     num_seeds = 1
     # Number of samples to use for plotting
-    num_samps = 500
+    num_samps = 10000
 
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
@@ -282,7 +284,7 @@ if __name__ == '__main__':
         vcs = VCSLAM(sess = sess,
                     vcs_agent = td_agent,
                     observ = zt_vals,
-                    num_particles = num_particles,
+                    num_particles = num_train_particles,
                     num_train_steps = num_train_steps,
                     lr_m = lr_m)
 
@@ -291,9 +293,10 @@ if __name__ == '__main__':
         opt_propsal_params = train_sess.run(opt_propsal_params)
 
         # Sample the model
-        my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=num_samps)
+        my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
         my_samples = train_sess.run(my_vars)
-        samples_np = np.array(my_samples)
+        samples_np = np.squeeze(np.array(my_samples))
+        print(samples_np.shape)
         plotting.plot_dist(samples_np,post_values)
 
     # plots TODO: clean up more and add other relevant plots

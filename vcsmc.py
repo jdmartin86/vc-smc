@@ -58,7 +58,7 @@ class VCSLAM():
         # Cached constant: the logarithm of the number of particles
         self.log_num_particles = tf.log(tf.to_float(self.num_particles))
 
-    def resampling(self, log_weights):
+    def resampling(self, log_weights, num_particles=None):
         """
         Stratified resampling
         Args:
@@ -70,12 +70,14 @@ class VCSLAM():
         # log unnormalized weights, we pass the weights in as logits, allowing
         # the distribution object to apply a softmax and normalize them.
         # log_weights = tf.gather(self.logw,t,axis=1)
+        if not num_particles:
+            num_particles = self.num_particles
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         ancestors = tf.stop_gradient(
-            resampling_dist.sample(sample_shape=(self.num_particles)))
+            resampling_dist.sample(sample_shape=(num_particles)))
         return ancestors
 
-    def sample_traj(self, log_weights):
+    def sample_traj(self, log_weights, num_samples=1):
         """
         Draw index from the particle set
         Args:
@@ -84,7 +86,7 @@ class VCSLAM():
             index: An ancenstral index
         """
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
-        return resampling_dist.sample()
+        return resampling_dist.sample(sample_shape=(num_samples))
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
         """
@@ -147,22 +149,26 @@ class VCSLAM():
         # print("Train SMC Time: ", (timeit.default_timer() - start_smc))
         return logZ
 
-    def sim_q(self, prop_params, model_params, y, vcs_obj, num_samples=1):
+    def sim_q(self, prop_params, model_params, y, vcs_obj, num_samples=1, num_particles=None):
         """
         Simulates a single sample from the VSMC approximation.
         This returns the SLAM solution
         This procedure is the same as the objective, but it saves the trajectory
         """
 
+        # Allow user to simulate q with more particles than we trained with
+        if not num_particles:
+            num_particles = self.num_particles
+
         # Initialize SMC
-        x_curr = tf.zeros(dtype=tf.float32,shape=(self.num_steps,self.num_particles,self.latent_dim))
-        x_prev = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
+        x_curr = tf.zeros(dtype=tf.float32,shape=(self.num_steps,num_particles,self.latent_dim))
+        x_prev = tf.zeros(dtype=tf.float32,shape=(num_particles,self.latent_dim))
 
         # Unnormalized particle weights
-        logw_tilde = tf.zeros(dtype=tf.float32,shape=(self.num_particles))
+        logw_tilde = tf.zeros(dtype=tf.float32,shape=(num_particles))
         logZ = tf.zeros(dtype=tf.float32,shape=(1))
 
-        X = tf.zeros(dtype=tf.float32, shape=(self.num_steps, self.num_particles, self.latent_dim))
+        X = tf.zeros(dtype=tf.float32, shape=(self.num_steps, num_particles, self.latent_dim))
 
         # For effective sample size (ESS) calculations
         # TODO: implement after testing regular resampling (04/22)
@@ -174,7 +180,7 @@ class VCSLAM():
             # Resampling
             # Shape of x_prev (num_particles,latent_dim)
             if t > 0:
-                ancestors = self.resampling(logw_tilde)
+                ancestors = self.resampling(logw_tilde, num_particles)
                 x_prev = tf.gather(x_curr,ancestors,axis=0) #TODO: this indexing won't work - just for prototyping
             else:
                 x_prev = x_curr[0,:,:]
@@ -192,7 +198,7 @@ class VCSLAM():
             # print(logw_tilde)
             max_logw_tilde = tf.math.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
-            logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(self.num_particles)) + max_logw_tilde
+            logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(num_particles)) + max_logw_tilde
 
             # Not sure if this is correct at all - Kevin
             W = tf.exp(logw_tilde_adj)
@@ -207,14 +213,16 @@ class VCSLAM():
         # print("LogW tilde: ", logw_tilde)
         # start_sample_traj = timeit.default_timer()
         # NOTE: this loop is slow
-        trajs = []
-        for n in range(num_samples):
-            B = self.sample_traj(logw_tilde)
-            trajs.append(tf.gather(x_curr,B,axis=0))
+        # trajs = []
+        # for n in range(num_samples):
+        #     B = self.sample_traj(logw_tilde)
+        #     trajs.append(tf.gather(x_curr,B,axis=0))
+        Bs = self.sample_traj(logw_tilde, num_samples)
+        return tf.gather(x_curr,Bs,axis=0)
         # print("Sample traj time: ", (timeit.default_timer() - start_sample_traj))
         # B = self.sample_traj(logW)
         # print("B: ", B)
-        return trajs
+        # return trajs
         # return x_curr, B
 
     def train(self,vcs_agent):

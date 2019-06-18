@@ -12,6 +12,8 @@ import seaborn as sbs
 from vcsmc import *
 import vcslam_agent
 
+import copula_gaussian as cg
+
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
 tf.reset_default_graph()
@@ -51,6 +53,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # Random state for sampling
         self.rs = rs
 
+        # initialize dependency models
+        self.init_dependency_params()
+
     def get_dependency_param_shape(self):
         return 0
 
@@ -65,6 +70,12 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
                  self.prop_scale * self.rs.randn(Dx)]).ravel() # Log-var
                 for t in range(T)])
         return marg_params
+
+    def init_dependency_params(self):
+        # State-component copula model
+        mean = tf.zeros(shape=[self.state_dim,self.state_dim], dtype=tf.float32)
+        scale_tril = tf.eye(self.state_dim, dtype=tf.float32) # TODO: update with lower (?) triangular matrix
+        self.copula_s = cg.GaussianCopulaTriL(loc=mean,scale_tril=scale_tril)
 
     def generate_data(self):
         # print(self.target_params)
@@ -164,6 +175,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         """
         # TODO: implement Gaussian copula here
         num_particles = x_curr.get_shape().as_list()[0]
+        #mapping = lambda x: tf.log(self.copula_s.prob(x))
+        #print(tf.map_fn(mapping, x_curr))
         return tf.zeros(shape=(num_particles),dtype=tf.float32)
 
     def log_proposal_copula_l(self,t,x_curr,x_prev,observ):

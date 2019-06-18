@@ -129,9 +129,58 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
         return sample
 
-    def log_proposal_copula(self, t, x_curr, x_prev, observ):
+    def log_proposal_copula_sl(self,t,x_curr,x_prev,observ):
+        """
+        Returns the log probability from the state-landmark copula
+        This function requires the multi-dimensional CDF of states,
+        and the mutli-dimensional CDF of all M landmarks
+        """
+        # TODO: implement log of multi-dimensional state and landmark copula density
+        # Need to split the tensor components into the state and land marks,
+        # transform with their CDFs and
+        # evaluate on the copula, and take the log
+        #s_curr_tilde = self.mv_state_cdf(s_curr,x_prev,observ)
+
+        # apply CDF for all landmarks (num_landmarks,landmark_dim)
+        #l_curr_tilde = self.mv_lndmk_cdf(l_curr,x_prev,observ)
+
+        # apply copula model
+        #C_sl = self.copula_sl(s_curr_tilde,l_curr_tilde)
+
+        # differentiate to get c?
         num_particles = x_curr.get_shape().as_list()[0]
-        return tf.zeros(shape=(num_particles), dtype=tf.float32)
+        return tf.zeros(shape=(num_particles),dtype=tf.float32)
+
+    def log_proposal_copula_ll(self,t,x_curr,x_prev,observ):
+        """
+        Log probability from the landmark-landmark copula
+        """
+        num_particles = x_curr.get_shape().as_list()[0]
+        return tf.zeros(shape=(num_particles),dtype=tf.float32)
+
+    def log_proposal_copula_s(self,t,x_curr,x_prev,observ):
+        """
+        Log probability from the state-component copula
+        """
+        # TODO: implement Gaussian copula here
+        num_particles = x_curr.get_shape().as_list()[0]
+        return tf.zeros(shape=(num_particles),dtype=tf.float32)
+
+    def log_proposal_copula_l(self,t,x_curr,x_prev,observ):
+        """
+        Log probability from the landmark-component copula
+        """
+        num_particles = x_curr.get_shape().as_list()[0]
+        return tf.zeros(shape=(num_particles),dtype=tf.float32)
+
+    def log_proposal_copula(self,t,x_curr,x_prev,observ):
+        """
+        Returns the log probability from the copula model described in Equation 4
+        """
+        return self.log_proposal_copula_sl(t,x_curr,x_prev,observ) + \
+               self.log_proposal_copula_ll(t,x_curr,x_prev,observ) + \
+               self.log_proposal_copula_s(t,x_curr,x_prev,observ)  + \
+               self.log_proposal_copula_l(t,x_curr,x_prev,observ)
 
     def log_normal(self, x, mu, Sigma):
         dim = Sigma.get_shape().as_list()[0]
@@ -193,7 +242,7 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 50
+    num_steps = 2
     # Number of particles to use during training
     num_train_particles = 1000
     # Number of particles to use during SMC query
@@ -260,6 +309,7 @@ if __name__ == '__main__':
 
         # Sample the model
         my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
+        
         # temporary
         # my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=1, num_particles=num_query_particles)
         # my_samples = [train_sess.run(my_vars) for i in range(num_samps)]

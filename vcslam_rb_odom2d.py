@@ -56,6 +56,15 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # initialize dependency models
         self.init_dependency_params()
 
+    def transition_model(self, x):
+        init_pose, init_cov, A, Q, C, R = self.target_params
+        return tf.matmul(A, x)
+
+    def measurement_model(self, x):
+        init_pose, init_cov, A, Q, C, R = self.target_params
+        return tf.matmul(C, x)
+
+
     def get_dependency_param_shape(self):
         return 0
 
@@ -88,14 +97,14 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         for t in range(self.num_steps):
             if t > 0:
-                x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(tf.matmul(A,x_true[t-1])),
+                x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.transition_model(x_true[t-1])),
                                                                    covariance_matrix=Q).sample(seed=self.rs.randint(0,1234))))
             else:
                 x_sample = tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(init_pose),
                                                                    covariance_matrix=init_cov).sample(seed=self.rs.randint(0,1234)))
                 x_sample = init_pose
                 x_true.append(x_sample)
-            z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(tf.matmul(C,x_true[t])),
+            z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.measurement_model(x_true[t])),
                                                                covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
         return x_true, z_true
 
@@ -115,10 +124,10 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         for t in range(self.num_steps):
             if t > 0:
                 # Predict Step
-                xpred = tf.matmul(A, xfilt)
+                xpred = self.transition_model(xfilt)
                 Ppred = tf.matmul(A, tf.matmul(Pfilt, tf.transpose(A))) + Q
             # Update step
-            yt = observ[t] - tf.matmul(C, xpred)
+            yt = observ[t] - self.measurement_model(xpred)
             S = tf.matmul(C, tf.matmul(Ppred, tf.transpose(C))) + R
             K = tf.transpose(tf.linalg.solve(S, tf.matmul(C, Ppred)))
             xfilt = xpred + tf.matmul(K,yt)
@@ -134,7 +143,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
-            mu = mut + tf.transpose(tf.matmul(A, tf.transpose(x_prev)))*lint
+            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:
             mu = mut + lint*tf.reshape(init_pose, (self.state_dim,))
         sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
@@ -209,17 +218,13 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # print(ls_term.get_shape().as_list())
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
-    # def log_mixture(self, x, y, Sigma, p1=0.7, p2=0.3, mu1=0.0, mu2=2.0):
-    #     return tf.log(p1*tf.exp(self.log_normal(x, mu1, Sigma)) +
-    #                   p2*tf.exp(self.log_normal(x, mu2, Sigma)))
-
     def log_target(self, t, x_curr, x_prev, observ):
         init_pose, init_cov, A, Q, C, R = self.target_params
         if t > 0:
-            logF = self.log_normal(x_curr, tf.transpose(tf.matmul(A, tf.transpose(x_prev))), Q)
+            logF = self.log_normal(x_curr, tf.transpose(self.transition_model(tf.transpose(x_prev))), Q)
         else:
             logF = self.log_normal(x_curr, tf.transpose(init_pose), init_cov)
-        logG = self.log_normal(tf.transpose(tf.matmul(C, tf.transpose(x_curr))), tf.transpose(tf.convert_to_tensor(observ[t], dtype=tf.float32)), R)
+        logG = self.log_normal(tf.transpose(self.measurement_model(tf.transpose(x_curr))), tf.transpose(tf.convert_to_tensor(observ[t], dtype=tf.float32)), R)
         return logF + logG
 
     def log_proposal_marginal(self, t, x_curr, x_prev, observ, proposal_params):
@@ -230,7 +235,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         log_s2t = proposal_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
-            mu = mut + tf.transpose(tf.matmul(A, tf.transpose(x_prev)))*lint
+            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:
             mu = mut + lint*tf.transpose(init_pose)
         return self.log_normal(x_curr, mu, tf.diag(s2t))

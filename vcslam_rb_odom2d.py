@@ -3,11 +3,7 @@ import tensorflow as tf
 from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 
-# TODO: consolidate plotting routines
 import plotting
-import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
-import seaborn as sbs
 
 from vcsmc import *
 import vcslam_agent
@@ -28,7 +24,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
                  latent_dim=None,
                  observ_dim=2,
                  rs=np.random.RandomState(0),
-                 prop_scale=0.5):
+                 prop_scale=0.5,
+                 cop_scale=1.0):
         # Target model params
         self.target_params = target_params
         # Number of time steps
@@ -50,11 +47,12 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # Proposal params
         self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
         self.prop_scale = prop_scale
+        self.cop_scale = cop_scale
         # Random state for sampling
         self.rs = rs
 
         # initialize dependency models
-        self.init_dependency_params()
+        # self.init_dependency_params()
 
     def transition_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -65,7 +63,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         return tf.matmul(C, x)
 
     def get_dependency_param_shape(self):
-        return 0
+        return [self.num_steps, self.state_dim*2]
 
     def get_marginal_param_shape(self):
         return [self.num_steps, self.state_dim*3]
@@ -81,9 +79,19 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
     def init_dependency_params(self):
         # State-component copula model
-        mean = tf.zeros(shape=[self.state_dim,self.state_dim], dtype=tf.float32)
-        scale_tril = tf.eye(self.state_dim, dtype=tf.float32) # TODO: update with lower (?) triangular matrix
-        self.copula_s = cg.GaussianCopulaTriL(loc=mean,scale_tril=scale_tril)
+        # mean = tf.zeros(shape=[self.state_dim,self.state_dim], dtype=tf.float32)
+        # scale_tril = tf.eye(self.state_dim, dtype=tf.float32) # TODO: update with lower (?) triangular matrix
+        # self.copula_s = cg.GaussianCopulaTriL(loc=mean,scale_tril=scale_tril)
+        T = self.num_steps
+        Dx = self.state_dim
+        # Each correlation param should be in [-1,1]
+        # So we compute the actual correlation param as
+        # (1 - exp(-x)) / (1 + exp(-x)) which you can verify as 2*sigmoid(x) - 1
+        # where sigmoid(x): R -> [0,1] = 1 / (1 + exp(-x))
+        # and we just rescale that to be [-1,1]
+        # I think there's a better way I just need to think about it for a bit - Kevin
+        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(Dx*2)).ravel() # correlation/covariance params
+                                  for t in range(T)])
         return np.array([])
 
     def generate_data(self):
@@ -185,7 +193,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         Log probability from the state-component copula
         """
         # TODO: implement Gaussian copula here
-        r_vec = prop_copula_params # should be length 6
+        r_vec = prop_copula_params[t,:] # should be length 6
         # print("RVEC Shape: ", r_vec.get_shape().as_list()[0])
         R_mat = tfd.fill_triangular(r_vec)
         num_particles = x_curr.get_shape().as_list()[0]
@@ -368,5 +376,5 @@ if __name__ == '__main__':
         zt_vals = np.array(zt_vals)
         plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
         plotting.plot_dist(samples_np,post_values)
-        plt.show()
+        # plt.show()
 

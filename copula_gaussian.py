@@ -14,8 +14,8 @@ class NormalCDF(tfb.Bijector):
   tersely this way).
 
   """
-  def __init__(self):
-    self.normal_dist = tfd.Normal(loc=0., scale=1.)
+  def __init__(self,loc=0.,scale=1.):
+    self.normal_dist = tfd.Normal(loc=loc, scale=scale)
     super(NormalCDF, self).__init__(
         forward_min_event_ndims=0,
         validate_args=False,

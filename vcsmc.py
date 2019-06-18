@@ -234,18 +234,15 @@ class VCSLAM():
         Creates the top-level computation graph for training
         """
         print("Starting training")
-        dependency_initializer = tf.contrib.layers.xavier_initializer()
+        dependency_initializer = tf.constant_initializer(vcs_agent.init_dependency_params())
         marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
 
         # Initialize the parameters
         with tf.variable_scope("vcsmc", reuse=tf.AUTO_REUSE):
-            if vcs_agent.get_dependency_param_shape() == 0:
-                dependency_params = []
-            else:
-                dependency_params = tf.get_variable( "theta",
-                                                    dtype=tf.float32,
-                                                    shape=vcs_agent.get_dependency_param_shape(),
-                                                    initializer=dependency_initializer)
+            dependency_params = tf.get_variable( "theta",
+                                                 dtype=tf.float32,
+                                                 shape=vcs_agent.get_dependency_param_shape(),
+                                                 initializer=dependency_initializer)
             marginal_params   = tf.get_variable( "eta",
                                                 dtype=tf.float32,
                                                 shape=vcs_agent.get_marginal_param_shape(),

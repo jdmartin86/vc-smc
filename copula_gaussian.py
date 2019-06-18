@@ -26,7 +26,7 @@ class NormalCDF(tfb.Bijector):
     return self.normal_dist.quantile(y)
 
   def _inverse(self, x):
-    # CDF of normal distribution. 
+    # CDF of normal distribution.
     return self.normal_dist.cdf(x)
 
   def _inverse_log_det_jacobian(self, x):

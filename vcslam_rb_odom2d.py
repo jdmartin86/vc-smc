@@ -53,7 +53,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         self.rs = rs
 
         # initialize dependency models
-        self.init_dependency_params()
+        # self.init_dependency_params()
 
     def transition_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -82,7 +82,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # State-component copula model represents a joint dependency distribution
         # over the state components
         mean = tf.zeros(shape=self.state_dim, dtype=tf.float32)
-        scale_tril = tf.eye(self.state_dim, dtype=tf.float32) 
+        scale_tril = tf.eye(self.state_dim, dtype=tf.float32)
         self.copula_s = cg.WarpedGaussianCopula(
             loc=mean,
             scale_tril=scale_tril,
@@ -93,15 +93,16 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         T = self.num_steps
         Dx = self.state_dim
-        # Each correlation param should be in [-1,1]
-        # So we compute the actual correlation param as
-        # (1 - exp(-x)) / (1 + exp(-x)) which you can verify as 2*sigmoid(x) - 1
-        # where sigmoid(x): R -> [0,1] = 1 / (1 + exp(-x))
-        # and we just rescale that to be [-1,1]
-        # I think there's a better way I just need to think about it for a bit - Kevin
+        # Each correlation param should be in [-1,1] So we compute the actual
+        # correlation param as (1 - exp(-x)) / (1 + exp(-x)) which you can
+        # verify as 2*sigmoid(x) - 1 where sigmoid(x): R -> [0,1] = 1 / (1 +
+        # exp(-x)) and we just rescale that to be [-1,1] I think there's a
+        # better way I just need to think about it for a bit - Kevin
         copula_params = np.array([np.array(self.cop_scale * self.rs.randn(Dx*2)).ravel() # correlation/covariance params
                                   for t in range(T)])
-        return np.array([])
+        # return np.array([])
+        return copula_params
+
     def generate_data(self):
         # print(self.target_params)
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -153,19 +154,50 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
     def sim_proposal(self, t, x_prev, observ, proposal_params):
         init_pose, init_cov, A, Q, C, R = self.target_params
         num_particles = x_prev.get_shape().as_list()[0]
-        proposal_marg_params = proposal_params[1]
-        mut = proposal_marg_params[t,0:3]
-        lint = proposal_marg_params[t,3:6]
-        log_s2t = proposal_marg_params[t,6:9]
+        prop_copula_params = proposal_params[0]
+        prop_marg_params = proposal_params[1]
+        mut = prop_marg_params[t,0:3]
+        lint = prop_marg_params[t,3:6]
+        log_s2t = prop_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
         if t > 0:
             mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:
-            mu = mut + lint*tf.reshape(init_pose, (self.state_dim,))
-        sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
+            mu = mut + lint*tf.transpose(init_pose)
+
+        # Copula params are defined over the reals, but we want a correlation matrix
+        # So we use a sigmoid map to take reals to the range [-1,1]
+        r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
+
+        # Build lower triangular matrix from sigmoid-mapped copula_params
+        L_mat = tfd.fill_triangular(r_vec)
+
+        # Marginal bijectors will be the CDFs of the univariate marginals Here
+        # these are normal CDFs
+        # print("Mu shape: ", mu.get_shape().as_list())
+        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
+        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
+        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
+
+        # Build a copula (can also store globally if we want) we would just
+        #  have to modify self.copula.scale_tril and
+        #  self.copula.marginal_bijectors in each iteration NOTE: I add
+        #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
+        gc = cg.WarpedGaussianCopula(
+            loc=[0., 0., 0.],
+            scale_tril=(tf.eye(3)), # TODO: This is currently just tf.eye(3), USE L_mat
+            marginal_bijectors=[
+                x1_cdf,
+                x2_cdf,
+                x3_cdf])
+
+        # print("X prev shape: ", x_prev.get_shape().as_list())
+        sample = gc.sample(x_prev.get_shape().as_list()[0],seed=self.rs.randint(0,1234))
+        # print("Sample shape: ", sample.get_shape().as_list())
+        # sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
         return sample
 
-    def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,prop_copula_params):
+    def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):
         """
         Returns the log probability from the state-landmark copula
         This function requires the multi-dimensional CDF of states,
@@ -189,72 +221,88 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # x_tilde =
         return tf.zeros(shape=(num_particles),dtype=tf.float32)
 
-    def log_proposal_copula_ll(self,t,x_curr,x_prev,observ,prop_copula_params):
+    def log_proposal_copula_ll(self,t,x_curr,x_prev,observ,proposal_params):
         """
         Log probability from the landmark-landmark copula
         """
         num_particles = x_curr.get_shape().as_list()[0]
         return tf.zeros(shape=(num_particles),dtype=tf.float32)
 
-    def log_proposal_copula_s(self,t,x_curr,x_prev,observ,prop_copula_params):
+    def log_proposal_copula_s(self,t,x_curr,x_prev,observ,proposal_params):
         """
         Log probability from the state-component copula
         """
         # TODO: implement Gaussian copula here
-        r_vec = prop_copula_params[t,:] # should be length 6
 
-        # TODO: relocate to the init marginal params routine
-        R_mat = tfd.fill_triangular(r_vec)
-        num_particles = x_curr.get_shape().as_list()[0]
-        x1_emp_mean = tf.reduce_mean(x_curr[:,0])
-        x2_emp_mean = tf.reduce_mean(x_curr[:,1])
-        x3_emp_mean = tf.reduce_mean(x_curr[:,2])
-        x1_emp_std = tf.math.reduce_std(x_curr[:,0])
-        x2_emp_std = tf.math.reduce_std(x_curr[:,1])
-        x3_emp_std = tf.math.reduce_std(x_curr[:,2])
-        x1_cdf = cg.NormalCDF(loc=x1_emp_mean, scale=x1_emp_std)
-        x2_cdf = cg.NormalCDF(loc=x2_emp_mean, scale=x2_emp_std)
-        x3_cdf = cg.NormalCDF(loc=x3_emp_mean, scale=x3_emp_std)
+        prop_copula_params, prop_marg_params = proposal_params
 
+        mut = prop_marg_params[t,0:3]
+        lint = prop_marg_params[t,3:6]
+        log_s2t = prop_marg_params[t,6:9]
+        s2t = tf.exp(log_s2t)
 
-        u1 = x1_cdf._forward(x_curr[:,0])
-        u2 = x2_cdf._forward(x_curr[:,1])
-        u3 = x3_cdf._forward(x_curr[:,2])
-        uni_cdf = cg.NormalCDF()
-        c1 = uni_cdf._inverse(u1)
-        c2 = uni_cdf._inverse(u2)
-        c3 = uni_cdf._inverse(u3)
-    
-        return 0*tf.log(self.copula_s.prob(x_curr))#TODO: enable!!!
+        # Copula params are defined over the reals, but we want a correlation matrix
+        # So we use a sigmoid map to take reals to the range [-1,1]
+        r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
 
-    def log_proposal_copula_l(self,t,x_curr,x_prev,observ,prop_copula_params):
+        # Build lower triangular matrix from sigmoid-mapped copula_params
+        L_mat = tfd.fill_triangular(r_vec)
+
+        # This is how we properly compute the marginal parameters based on the
+        # model c.f. log_proposal_marginal function
+        if t > 0:
+            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
+        else:
+            mu = mut + lint*tf.transpose(init_pose)
+
+        # Marginal bijectors will be the CDFs of the univariate marginals Here
+        # these are normal CDFs
+        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
+        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
+        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
+
+        # Build a copula (can also store globally if we want) we would just
+        #  have to modify self.copula.scale_tril and
+        #  self.copula.marginal_bijectors in each iteration NOTE: I add
+        #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
+        gc = cg.WarpedGaussianCopula(
+            loc=[0., 0., 0.],
+            scale_tril=(tf.eye(3)), # TODO This is currently just eye(3), use L_mat!
+            marginal_bijectors=[
+                x1_cdf,
+                x2_cdf,
+                x3_cdf])
+
+        # Some attempted debugging..
+        # x_curr = tf.debugging.check_numerics(x_curr, "X curr has problems")
+        # prob = gc.log_prob(x_curr)
+        # prob = tf.debugging.check_numerics(prob, "Prob has Nans")
+        return gc.log_prob(x_curr)
+
+    def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):
         """
         Log probability from the landmark-component copula
         """
         num_particles = x_curr.get_shape().as_list()[0]
         return tf.zeros(shape=(num_particles),dtype=tf.float32)
 
-    def log_proposal_copula(self,t,x_curr,x_prev,observ,prop_copula_params):
+    def log_proposal_copula(self,t,x_curr,x_prev,observ,proposal_params):
         """
         Returns the log probability from the copula model described in Equation 4
         """
-        return self.log_proposal_copula_sl(t,x_curr,x_prev,observ,prop_copula_params) + \
-               self.log_proposal_copula_ll(t,x_curr,x_prev,observ,prop_copula_params) + \
-               self.log_proposal_copula_s(t,x_curr,x_prev,observ,prop_copula_params)  + \
-               self.log_proposal_copula_l(t,x_curr,x_prev,observ,prop_copula_params)
+        return self.log_proposal_copula_sl(t,x_curr,x_prev,observ,proposal_params) + \
+            self.log_proposal_copula_ll(t,x_curr,x_prev,observ,proposal_params) + \
+            self.log_proposal_copula_s(t,x_curr,x_prev,observ,proposal_params) + \
+            self.log_proposal_copula_l(t,x_curr,x_prev,observ,proposal_params)
 
     def log_normal(self, x, mu, Sigma):
         dim = Sigma.get_shape().as_list()[0]
         sign, logdet = tf.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
         Prec = tf.dtypes.cast(tf.linalg.inv(Sigma), dtype=tf.float32)
-        # print(mu)
-        # print(mu.get_shape().as_list()[0])
         first_term = x - mu
-        # print(first_term.get_shape().as_list())
         second_term = tf.transpose(tf.matmul(Prec, tf.transpose(x-mu)))
         ls_term = -0.5*tf.reduce_sum(first_term*second_term,1)
-        # print(ls_term.get_shape().as_list())
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
     def log_target(self, t, x_curr, x_prev, observ):
@@ -284,8 +332,13 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
         prop_copula_params, prop_marg_params = proposal_params
-        return self.log_proposal_copula(t, x_curr, x_prev, observ, prop_copula_params) + \
-               self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
+        prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
+        prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
+        cl = self.log_proposal_copula(t, x_curr, x_prev, observ, proposal_params)
+        cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
+        cl = tf.debugging.check_numerics(cl, "copula log error")
+        cm = tf.debugging.check_numerics(cm, "marg log error")
+        return cl + cm
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)

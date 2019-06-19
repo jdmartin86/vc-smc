@@ -171,12 +171,14 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # Build lower triangular matrix from sigmoid-mapped copula_params
         L_mat = tfd.fill_triangular(r_vec)
 
+        mu = tf.debugging.check_numerics(mu, "Mu is broken!")
+        s2t = tf.debugging.check_numerics(s2t, "S2t is broken!")
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
         # print("Mu shape: ", mu.get_shape().as_list())
-        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
-        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
-        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
+        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
+        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
+        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
@@ -192,6 +194,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # print("X prev shape: ", x_prev.get_shape().as_list())
         sample = gc.sample(x_prev.get_shape().as_list()[0],seed=self.rs.randint(0,1234))
+        sample = tf.debugging.check_numerics(sample, "Sample is broken!")
         # print("Sample shape: ", sample.get_shape().as_list())
         # sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
         return sample
@@ -256,9 +259,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
-        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
-        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
-        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
+        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
+        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
+        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
@@ -303,7 +306,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
         # Sigma = tf.Print(Sigma, [Sigma], summarize=10, message="Sigma values")
         Prec = tf.dtypes.cast(tf.linalg.inv(Sigma), dtype=tf.float32)
+        x = tf.debugging.check_numerics(x, "it was the x term!")
         first_term = x - mu
+        first_term = tf.debugging.check_numerics(first_term, "it was the first term!")
         second_term = tf.transpose(tf.matmul(Prec, tf.transpose(x-mu)))
         second_term = tf.debugging.check_numerics(second_term, "it was the second term!")
         ls_term = -0.5*tf.reduce_sum(first_term*second_term,1)
@@ -326,6 +331,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         In the Gaussian case the multivariate normal with diagonal covariance equals:
         prod_{i=1}^{self.state_dim} p(x_curr[i] | x_prev[i]; proposal_params)
         """
+        x_curr = tf.debugging.check_numerics(x_curr, "X curr has issues...")
         init_pose, init_cov, A, Q, C, R = self.target_params
         mut = prop_marg_params[t,0:3]
         lint = prop_marg_params[t,3:6]
@@ -367,11 +373,11 @@ if __name__ == '__main__':
     # Number of steps for the trajectory
     num_steps = 10
     # Number of particles to use during training
-    num_train_particles = 1000
+    num_train_particles = 2500
     # Number of particles to use during SMC query
     num_query_particles = 1000000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 5000
+    num_train_steps = 1700
     # Learning rate for the distribution
     lr_m = 0.001
     # Number of random seeds for experimental trials

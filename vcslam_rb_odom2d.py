@@ -2,7 +2,6 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
-
 import plotting
 
 from vcsmc import *
@@ -175,9 +174,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
         # print("Mu shape: ", mu.get_shape().as_list())
-        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
-        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
-        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
+        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
+        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
+        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
@@ -187,9 +186,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             loc=[0., 0., 0.],
             scale_tril=(tf.eye(3)), # TODO: This is currently just tf.eye(3), USE L_mat
             marginal_bijectors=[
-                x1_cdf,
-                x2_cdf,
-                x3_cdf])
+                x1_mb,
+                x2_mb,
+                x3_mb])
 
         # print("X prev shape: ", x_prev.get_shape().as_list())
         sample = gc.sample(x_prev.get_shape().as_list()[0],seed=self.rs.randint(0,1234))
@@ -257,9 +256,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
-        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
-        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
-        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
+        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=s2t[0])
+        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=s2t[1])
+        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=s2t[2])
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
@@ -269,15 +268,18 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             loc=[0., 0., 0.],
             scale_tril=(tf.eye(3)), # TODO This is currently just eye(3), use L_mat!
             marginal_bijectors=[
-                x1_cdf,
-                x2_cdf,
-                x3_cdf])
+                x1_mb,
+                x2_mb,
+                x3_mb])
 
         # Some attempted debugging..
         # x_curr = tf.debugging.check_numerics(x_curr, "X curr has problems")
         # prob = gc.log_prob(x_curr)
         # prob = tf.debugging.check_numerics(prob, "Prob has Nans")
-        return gc.log_prob(x_curr)
+        # prob = gc.prob(x_curr)
+        # prob = tf.Print(prob, [tf.count_nonzero(prob), prob.get_shape().as_list()],message="prob info")
+        log_prob = gc.log_prob(x_curr)
+        return log_prob
 
     def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):
         """
@@ -299,10 +301,15 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         dim = Sigma.get_shape().as_list()[0]
         sign, logdet = tf.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
+        # Sigma = tf.Print(Sigma, [Sigma], summarize=10, message="Sigma values")
         Prec = tf.dtypes.cast(tf.linalg.inv(Sigma), dtype=tf.float32)
         first_term = x - mu
         second_term = tf.transpose(tf.matmul(Prec, tf.transpose(x-mu)))
+        second_term = tf.debugging.check_numerics(second_term, "it was the second term!")
         ls_term = -0.5*tf.reduce_sum(first_term*second_term,1)
+        # ls_term = tf.Print(ls_term, [ls_term], message="Squares term!")
+        ls_term = tf.debugging.check_numerics(ls_term, "it was the ls term!")
+        # log_norm = tf.Print(log_norm , [log_norm], message="Log norm term!")
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
     def log_target(self, t, x_curr, x_prev, observ):
@@ -328,7 +335,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:
             mu = mut + lint*tf.transpose(init_pose)
-        return self.log_normal(x_curr, mu, tf.diag(s2t))
+        log_prob = self.log_normal(x_curr, mu, tf.diag(s2t))
+        log_prob = tf.debugging.check_numerics(log_prob, "Log marginal prob error!")
+        return log_prob
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
         prop_copula_params, prop_marg_params = proposal_params
@@ -356,13 +365,13 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 2
+    num_steps = 10
     # Number of particles to use during training
     num_train_particles = 1000
     # Number of particles to use during SMC query
     num_query_particles = 1000000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 1000
+    num_train_steps = 5000
     # Learning rate for the distribution
     lr_m = 0.001
     # Number of random seeds for experimental trials
@@ -370,7 +379,7 @@ if __name__ == '__main__':
     # Number of samples to use for plotting
     num_samps = 10000
     # Proposal initial scale
-    prop_scale = -0.01
+    prop_scale = 0.1
 
 
     # True target parameters

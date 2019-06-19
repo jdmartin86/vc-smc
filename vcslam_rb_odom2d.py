@@ -46,13 +46,14 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         self.observ_dim = observ_dim
         # Proposal params
         self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
+
         self.prop_scale = prop_scale
         self.cop_scale = cop_scale
         # Random state for sampling
         self.rs = rs
 
         # initialize dependency models
-        # self.init_dependency_params()
+        self.init_dependency_params()
 
     def transition_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -78,10 +79,18 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         return marg_params
 
     def init_dependency_params(self):
-        # State-component copula model
-        # mean = tf.zeros(shape=[self.state_dim,self.state_dim], dtype=tf.float32)
-        # scale_tril = tf.eye(self.state_dim, dtype=tf.float32) # TODO: update with lower (?) triangular matrix
-        # self.copula_s = cg.GaussianCopulaTriL(loc=mean,scale_tril=scale_tril)
+        # State-component copula model represents a joint dependency distribution
+        # over the state components
+        mean = tf.zeros(shape=self.state_dim, dtype=tf.float32)
+        scale_tril = tf.eye(self.state_dim, dtype=tf.float32) 
+        self.copula_s = cg.WarpedGaussianCopula(
+            loc=mean,
+            scale_tril=scale_tril,
+            marginal_bijectors=[
+                tfd.Normal(loc=0., scale=1.),
+                tfd.Normal(loc=0., scale=1.),
+                tfd.Normal(loc=0., scale=1.)])
+
         T = self.num_steps
         Dx = self.state_dim
         # Each correlation param should be in [-1,1]
@@ -93,7 +102,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         copula_params = np.array([np.array(self.cop_scale * self.rs.randn(Dx*2)).ravel() # correlation/covariance params
                                   for t in range(T)])
         return np.array([])
-
     def generate_data(self):
         # print(self.target_params)
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -194,7 +202,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         """
         # TODO: implement Gaussian copula here
         r_vec = prop_copula_params[t,:] # should be length 6
-        # print("RVEC Shape: ", r_vec.get_shape().as_list()[0])
+
+        # TODO: relocate to the init marginal params routine
         R_mat = tfd.fill_triangular(r_vec)
         num_particles = x_curr.get_shape().as_list()[0]
         x1_emp_mean = tf.reduce_mean(x_curr[:,0])
@@ -206,6 +215,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         x1_cdf = cg.NormalCDF(loc=x1_emp_mean, scale=x1_emp_std)
         x2_cdf = cg.NormalCDF(loc=x2_emp_mean, scale=x2_emp_std)
         x3_cdf = cg.NormalCDF(loc=x3_emp_mean, scale=x3_emp_std)
+
+
         u1 = x1_cdf._forward(x_curr[:,0])
         u2 = x2_cdf._forward(x_curr[:,1])
         u3 = x3_cdf._forward(x_curr[:,2])

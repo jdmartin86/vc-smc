@@ -87,9 +87,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             loc=mean,
             scale_tril=scale_tril,
             marginal_bijectors=[
-                tfd.Normal(loc=0., scale=1.),
-                tfd.Normal(loc=0., scale=1.),
-                tfd.Normal(loc=0., scale=1.)])
+                cg.NormalCDF(loc=0., scale=1.),
+                cg.NormalCDF(loc=0., scale=1.),
+                cg.NormalCDF(loc=0., scale=1.)])
 
         T = self.num_steps
         Dx = self.state_dim
@@ -224,10 +224,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         c1 = uni_cdf._inverse(u1)
         c2 = uni_cdf._inverse(u2)
         c3 = uni_cdf._inverse(u3)
-
-        #mapping = lambda x: tf.log(self.copula_s.prob(x))
-        #print(tf.map_fn(mapping, x_curr))
-        return tf.zeros(shape=(num_particles),dtype=tf.float32)
+    
+        return 0*tf.log(self.copula_s.prob(x_curr))#TODO: enable!!!
 
     def log_proposal_copula_l(self,t,x_curr,x_prev,observ,prop_copula_params):
         """

@@ -3,6 +3,7 @@ import tensorflow as tf
 from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 import plotting
+import tensorflow_probability as tfp
 
 from vcsmc import *
 import vcslam_agent
@@ -155,10 +156,16 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         num_particles = x_prev.get_shape().as_list()[0]
         prop_copula_params = proposal_params[0]
         prop_marg_params = proposal_params[1]
+
         mut = prop_marg_params[t,0:3]
         lint = prop_marg_params[t,3:6]
         log_s2t = prop_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
+
+        # This was a test to remove s2t from the optimization
+        # s2t = tf.diag_part(Q)
+        s2t = 0.01*tf.ones(3)
+
         if t > 0:
             mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:
@@ -176,27 +183,28 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
         # print("Mu shape: ", mu.get_shape().as_list())
-        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
-        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
-        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
+        x1_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
+        x2_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
+        x3_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
         #  self.copula.marginal_bijectors in each iteration NOTE: I add
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        gc = cg.WarpedGaussianCopula(
+        gc_sim = cg.WarpedGaussianCopula(
             loc=[0., 0., 0.],
             scale_tril=(tf.eye(3)), # TODO: This is currently just tf.eye(3), USE L_mat
             marginal_bijectors=[
-                x1_mb,
-                x2_mb,
-                x3_mb])
+                x1_mb_sim,
+                x2_mb_sim,
+                x3_mb_sim])
 
         # print("X prev shape: ", x_prev.get_shape().as_list())
-        sample = gc.sample(x_prev.get_shape().as_list()[0],seed=self.rs.randint(0,1234))
-        sample = tf.debugging.check_numerics(sample, "Sample is broken!")
-        # print("Sample shape: ", sample.get_shape().as_list())
+        # sample = tf.stop_gradient(gc_sim.sample(x_prev.get_shape().as_list()[0]))
+        sample = gc_sim.sample(x_prev.get_shape().as_list()[0])
+        # sample = tf.debugging.check_numerics(sample, "Sample is broken!")
         # sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
+        print("Sample shape: ", sample.get_shape().as_list())
         return sample
 
     def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):
@@ -242,6 +250,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         lint = prop_marg_params[t,3:6]
         log_s2t = prop_marg_params[t,6:9]
         s2t = tf.exp(log_s2t)
+        s2t = 0.01*tf.ones(3)
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
@@ -277,12 +286,25 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Some attempted debugging..
         # x_curr = tf.debugging.check_numerics(x_curr, "X curr has problems")
-        # prob = gc.log_prob(x_curr)
-        # prob = tf.debugging.check_numerics(prob, "Prob has Nans")
+
+        prob = gc.prob(x_curr)
+        prob = tf.where(tf.is_nan(prob), tf.zeros_like(prob), prob)
+        prob = tf.debugging.check_numerics(prob, "Prob has errors")
+        log_prob = gc.log_prob(x_curr)
+
+        # log_prob = tf.where(tf.is_nan(log_prob), (-(10.0e10))*tf.ones_like(log_prob), log_prob)
+        log_prob = tf.debugging.check_numerics(log_prob, "Log Prob has errors")
         # prob = gc.prob(x_curr)
         # prob = tf.Print(prob, [tf.count_nonzero(prob), prob.get_shape().as_list()],message="prob info")
-        log_prob = gc.log_prob(x_curr)
+        # return log_prob
+        # lp0 = tfp.distributions.Normal(loc=mu[:,0], scale=tf.sqrt(s2t[0])).log_prob(tf.transpose(x_curr[:,0]))
+        # lp1 = tfp.distributions.Normal(loc=mu[:,1], scale=tf.sqrt(s2t[1])).log_prob(tf.transpose(x_curr[:,1]))
+        # lp2 = tfp.distributions.Normal(loc=mu[:,2], scale=tf.sqrt(s2t[2])).log_prob(tf.transpose(x_curr[:,2]))
+        # lp_total = lp0 + lp1 + lp2
+        # print("LP shape: ", lp_total.get_shape().as_list())
+        # return lp_total
         return log_prob
+
 
     def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):
         """
@@ -336,7 +358,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         mut = prop_marg_params[t,0:3]
         lint = prop_marg_params[t,3:6]
         log_s2t = prop_marg_params[t,6:9]
-        s2t = tf.exp(log_s2t)
+        # s2t = tf.exp(log_s2t)
+        s2t = 0.01*tf.ones(3)
         if t > 0:
             mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:
@@ -353,7 +376,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
         cl = tf.debugging.check_numerics(cl, "copula log error")
         cm = tf.debugging.check_numerics(cm, "marg log error")
-        return cl + cm
+        return cl
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
@@ -361,7 +384,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         prop_log = self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
         prop_log = tf.debugging.check_numerics(prop_log, "Proposal log error")
         return target_log - prop_log
-
 
 if __name__ == '__main__':
     # List available devices
@@ -373,11 +395,11 @@ if __name__ == '__main__':
     # Number of steps for the trajectory
     num_steps = 10
     # Number of particles to use during training
-    num_train_particles = 2500
+    num_train_particles = 1000
     # Number of particles to use during SMC query
     num_query_particles = 1000000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 1700
+    num_train_steps = 5000
     # Learning rate for the distribution
     lr_m = 0.001
     # Number of random seeds for experimental trials
@@ -385,7 +407,7 @@ if __name__ == '__main__':
     # Number of samples to use for plotting
     num_samps = 10000
     # Proposal initial scale
-    prop_scale = 0.1
+    prop_scale = 0.5
 
 
     # True target parameters

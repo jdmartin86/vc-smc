@@ -53,7 +53,13 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         self.rs = rs
 
         # initialize dependency models
-        # self.init_dependency_params()
+        self.copula_s = cg.WarpedGaussianCopula(
+            loc = tf.zeros(shape=self.state_dim, dtype=tf.float32),
+            scale_tril = tf.eye(self.state_dim, dtype=tf.float32),
+            marginal_bijectors=[
+                cg.NormalCDF(loc=0., scale=1.),
+                cg.NormalCDF(loc=0., scale=1.),
+                cg.NormalCDF(loc=0., scale=1.)])
 
     def transition_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -80,16 +86,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
     def init_dependency_params(self):
         # State-component copula model represents a joint dependency distribution
         # over the state components
-        mean = tf.zeros(shape=self.state_dim, dtype=tf.float32)
-        scale_tril = tf.eye(self.state_dim, dtype=tf.float32)
-        self.copula_s = cg.WarpedGaussianCopula(
-            loc=mean,
-            scale_tril=scale_tril,
-            marginal_bijectors=[
-                cg.NormalCDF(loc=0., scale=1.),
-                cg.NormalCDF(loc=0., scale=1.),
-                cg.NormalCDF(loc=0., scale=1.)])
-
         T = self.num_steps
         Dx = self.state_dim
         # Each correlation param should be in [-1,1] So we compute the actual
@@ -174,23 +170,18 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
-        x1_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
-        x2_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
-        x3_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
+        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
+        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
+        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
         #  self.copula.marginal_bijectors in each iteration NOTE: I add
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        gc_sim = cg.WarpedGaussianCopula(
-            loc=[0., 0., 0.],
-            scale_tril=(tf.eye(3)), # TODO: This is currently just tf.eye(3), USE L_mat
-            marginal_bijectors=[
-                x1_mb_sim,
-                x2_mb_sim,
-                x3_mb_sim])
+        self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
+        self.copula_s.distribution.scale = tf.eye(3)
 
-        sample = gc_sim.sample(x_prev.get_shape().as_list()[0])
+        sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
         return sample
 
     def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):
@@ -253,24 +244,18 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
-        x1_mb = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
-        x2_mb = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
-        x3_mb = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
+        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
+        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
+        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
         #  self.copula.marginal_bijectors in each iteration NOTE: I add
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        gc = cg.WarpedGaussianCopula(
-            loc=[0., 0., 0.],
-            scale_tril=(tf.eye(3)), # TODO This is currently just eye(3), use L_mat!
-            marginal_bijectors=[
-                x1_mb,
-                x2_mb,
-                x3_mb])
+        self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
+        self.copula_s.distribution.scale = tf.eye(3)
 
-        log_prob = gc.log_prob(x_curr)
-        return gc.log_prob(x_curr)
+        return self.copula_s.log_prob(x_curr)
 
 
     def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):

@@ -74,7 +74,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         Dx = self.state_dim
         marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
                  1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
-                 # self.prop_scale * self.rs.randn(Dx)]).ravel() # Log-var
                 for t in range(T)])
         return marg_params
 
@@ -100,11 +99,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # better way I just need to think about it for a bit - Kevin
         copula_params = np.array([np.array(self.cop_scale * self.rs.randn(Dx*2)).ravel() # correlation/covariance params
                                   for t in range(T)])
-        # return np.array([])
         return copula_params
 
     def generate_data(self):
-        # print(self.target_params)
         init_pose, init_cov, A, Q, C, R = self.target_params
         Dx = init_pose.get_shape().as_list()[0]
         Dz = R.get_shape().as_list()[0]
@@ -175,11 +172,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # Build lower triangular matrix from sigmoid-mapped copula_params
         L_mat = tfd.fill_triangular(r_vec)
 
-        mu = tf.debugging.check_numerics(mu, "Mu is broken!")
-        s2t = tf.debugging.check_numerics(s2t, "S2t is broken!")
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
-        # print("Mu shape: ", mu.get_shape().as_list())
         x1_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
         x2_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
         x3_mb_sim = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
@@ -196,10 +190,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
                 x2_mb_sim,
                 x3_mb_sim])
 
-        # print("X prev shape: ", x_prev.get_shape().as_list())
-        # sample = tf.stop_gradient(gc_sim.sample(x_prev.get_shape().as_list()[0]))
         sample = gc_sim.sample(x_prev.get_shape().as_list()[0])
-        print("Sample shape: ", sample.get_shape().as_list())
         return sample
 
     def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):

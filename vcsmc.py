@@ -258,6 +258,11 @@ class VCSLAM():
 
             # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
             learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
+            # optimizer = self.optimizer(learning_rate=self.lr_m)
+            # gradients, variables = zip(*optimizer.compute_gradients(loss, var_list=marginal_params))
+            # gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+            # gradients = [tf.clip_by_value(grad, clip_value_min=-10.0, clip_value_max=10.0) for grad in gradients]
+            # learn_marginal = optimizer.apply_gradients(zip(gradients, variables))
 
             # Start the session
             self.sess.run(tf.global_variables_initializer())

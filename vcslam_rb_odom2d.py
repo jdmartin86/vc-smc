@@ -49,6 +49,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         self.prop_scale = prop_scale
         self.cop_scale = cop_scale
+
         # Random state for sampling
         self.rs = rs
 
@@ -110,12 +111,11 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
                 x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.transition_model(x_true[t-1])),
                                                                    covariance_matrix=Q).sample(seed=self.rs.randint(0,1234))))
             else:
-                x_sample = tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(init_pose),
-                                                                   covariance_matrix=init_cov).sample(seed=self.rs.randint(0,1234)))
                 x_sample = init_pose
                 x_true.append(x_sample)
             z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.measurement_model(x_true[t])),
                                                                covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
+
         return x_true, z_true
 
     def lgss_posterior_params(self, observ, T):

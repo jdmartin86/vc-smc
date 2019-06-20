@@ -255,11 +255,12 @@ class VCSLAM():
             loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(-loss))
             summary_op = tf.summary.merge_all()
 
-            # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
+            learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
             learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
 
             # Start the session
             self.sess.run(tf.global_variables_initializer())
+            print("Original dep params:\n", dependency_params.eval(session=self.sess))
             print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
 
             # Top-level training loop
@@ -269,23 +270,22 @@ class VCSLAM():
             for it in range(self.num_train_steps):
 
                 # Train the dependency model
-                # _, loss_curr = sess.run([learn_dependency, loss])
+                _, loss_curr = self.sess.run([learn_dependency, loss])
 
-                # if np.isnan(loss_curr):
-                #     print("NAN loss:", it)
-                #     break
+                if np.isnan(loss_curr):
+                    print("NAN loss:", it)
+                    return None
 
                 # dep_losses[it] = loss_curr
 
                 # Train the marginal model
                 _, loss_curr, summary_str = self.sess.run([learn_marginal, loss, summary_op])
-                # elbo = -loss_curr
+
                 self.summary_writer.add_summary(summary_str, it)
                 if np.isnan(loss_curr):
                     print("NAN loss:", it)
                     # Break everything if the loss goes to NaN
                     return None
-                    break
 
                 # mar_losses[it] = loss_curr
 

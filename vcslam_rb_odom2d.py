@@ -4,6 +4,8 @@ from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 import plotting
 import tensorflow_probability as tfp
+# tfb = tfp.bijectors
+import correlation_cholesky as cc
 
 from vcsmc import *
 import vcslam_agent
@@ -25,7 +27,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
                  observ_dim=2,
                  rs=np.random.RandomState(0),
                  prop_scale=0.5,
-                 cop_scale=1.0):
+                 cop_scale=0.5):
         # Target model params
         self.target_params = target_params
         # Number of time steps
@@ -71,7 +73,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         return tf.matmul(C, x)
 
     def get_dependency_param_shape(self):
-        return [self.num_steps, self.state_dim*2]
+        return [self.num_steps, self.state_dim]
 
     def get_marginal_param_shape(self):
         return [self.num_steps, self.state_dim*3]
@@ -94,8 +96,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # verify as 2*sigmoid(x) - 1 where sigmoid(x): R -> [0,1] = 1 / (1 +
         # exp(-x)) and we just rescale that to be [-1,1] I think there's a
         # better way I just need to think about it for a bit - Kevin
-        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(Dx*2)).ravel() # correlation/covariance params
+        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(Dx)).ravel() # correlation/covariance params
                                   for t in range(T)])
+        # copula_params = np.array([np.zeros(Dx).ravel() for t in range(T)])
         return copula_params
 
     def generate_data(self):
@@ -163,10 +166,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
-        r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
-
-        # Build lower triangular matrix from sigmoid-mapped copula_params
-        L_mat = tfd.fill_triangular(r_vec)
+        # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
+        r_vec = prop_copula_params[t,:]
+        L_mat = cc.CorrelationCholesky().forward(r_vec)
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
@@ -178,11 +180,18 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         #  have to modify self.copula.scale_tril and
         #  self.copula.marginal_bijectors in each iteration NOTE: I add
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
-        self.copula_s.distribution.scale = tf.eye(3)
+        gc = cg.WarpedGaussianCopula(
+            loc=[0., 0., 0.],
+            scale_tril=L_mat, # TODO This is currently just eye(3), use L_mat!
+            marginal_bijectors=[
+                x1_cdf,
+                x2_cdf,
+                x3_cdf])
+        # self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
+        # self.copula_s.distribution.scale_tril = L_mat
 
-        sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
-        return sample
+        # sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
+        return gc.sample(x_prev.get_shape().as_list()[0])
 
     def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):
         """
@@ -230,10 +239,10 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
-        r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
-
-        # Build lower triangular matrix from sigmoid-mapped copula_params
-        L_mat = tfd.fill_triangular(r_vec)
+        # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
+        # use correlationcholesky to do the right thing
+        r_vec = prop_copula_params[t,:]
+        L_mat = cc.CorrelationCholesky().forward(r_vec)
 
         # This is how we properly compute the marginal parameters based on the
         # model c.f. log_proposal_marginal function
@@ -252,10 +261,17 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         #  have to modify self.copula.scale_tril and
         #  self.copula.marginal_bijectors in each iteration NOTE: I add
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
-        self.copula_s.distribution.scale = tf.eye(3)
+        # self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
+        # self.copula_s.distribution.scale_tril = L_mat
+        gc = cg.WarpedGaussianCopula(
+            loc=[0., 0., 0.],
+            scale_tril=L_mat, # TODO This is currently just eye(3), use L_mat!
+            marginal_bijectors=[
+                x1_cdf,
+                x2_cdf,
+                x3_cdf])
 
-        return self.copula_s.log_prob(x_curr)
+        return gc.log_prob(x_curr)
 
 
     def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):
@@ -340,19 +356,23 @@ if __name__ == '__main__':
     # Number of steps for the trajectory
     num_steps = 10
     # Number of particles to use during training
-    num_train_particles = 1000
+    num_train_particles = 100
     # Number of particles to use during SMC query
     num_query_particles = 1000000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 5000
-    # Learning rate for the distribution
-    lr_m = 0.001
+    num_train_steps = 2000
+    # Learning rate for the marginal
+    lr_m = 0.01
+    # Learning rate for the copula
+    lr_d = 0.001
     # Number of random seeds for experimental trials
     num_seeds = 1
     # Number of samples to use for plotting
     num_samps = 10000
     # Proposal initial scale
     prop_scale = 0.5
+    # Copula initial scale
+    cop_scale = 0.1
 
 
     # True target parameters
@@ -361,6 +381,9 @@ if __name__ == '__main__':
     init_cov = 0.01*tf.eye(3,3,dtype=np.float32)
     A = 1.1*tf.eye(3,3,dtype=np.float32)
     Q = 0.01*tf.eye(3,3,dtype=np.float32)
+    # This was an attempt to make a correlated covariance matrix, it kind of works
+    # L = tf.constant([[0.5, 0.0, 0.0], [0.1, 0.1234, 0.0], [1.0, 0.8591, 2.0]], dtype=tf.float32)
+    # Q = 0.5*(L + tf.transpose(L))
     C = tf.eye(2,3,dtype=np.float32)
     R = 0.01*tf.eye(2,2,dtype=np.float32)
     target_params = [init_pose,init_cov,A,Q,C,R]
@@ -370,7 +393,7 @@ if __name__ == '__main__':
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
-    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale)
+    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
 
     # Generate observations TODO: change to numpy implementation
     x_true, z_true = td_agent.generate_data()
@@ -396,13 +419,16 @@ if __name__ == '__main__':
                      observ = zt_vals,
                      num_particles = num_train_particles,
                      num_train_steps = num_train_steps,
+                     lr_d = lr_d,
                      lr_m = lr_m,
                      summary_writer = writer)
 
         # Train the model
         opt_proposal_params, train_sess = vcs.train(vcs_agent = td_agent)
         opt_proposal_params = train_sess.run(opt_proposal_params)
+        opt_dep_params, opt_marg_params = opt_proposal_params
         print(opt_proposal_params)
+        print("Optimal dep params: ", opt_dep_params)
 
         # Sample the model
         my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)

@@ -73,8 +73,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         T = self.num_steps
         Dx = self.state_dim
         marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
-                 1. + self.prop_scale * self.rs.randn(Dx), # Linear times A/mu0
-                 self.prop_scale * self.rs.randn(Dx)]).ravel() # Log-var
+                 1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
+                 # self.prop_scale * self.rs.randn(Dx)]).ravel() # Log-var
                 for t in range(T)])
         return marg_params
 
@@ -159,12 +159,9 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         mut = prop_marg_params[t,0:3]
         lint = prop_marg_params[t,3:6]
-        log_s2t = prop_marg_params[t,6:9]
-        s2t = tf.exp(log_s2t)
 
-        # This was a test to remove s2t from the optimization
-        # s2t = tf.diag_part(Q)
-        s2t = 0.01*tf.ones(3)
+        # Use "bootstrap" method for s2t of univariates
+        s2t = tf.diag_part(Q)
 
         if t > 0:
             mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
@@ -202,8 +199,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         # print("X prev shape: ", x_prev.get_shape().as_list())
         # sample = tf.stop_gradient(gc_sim.sample(x_prev.get_shape().as_list()[0]))
         sample = gc_sim.sample(x_prev.get_shape().as_list()[0])
-        # sample = tf.debugging.check_numerics(sample, "Sample is broken!")
-        # sample = mu + tf.random.normal(x_prev.get_shape().as_list(),seed=self.rs.randint(0,1234))*tf.sqrt(s2t)
         print("Sample shape: ", sample.get_shape().as_list())
         return sample
 
@@ -244,13 +239,12 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         """
         # TODO: implement Gaussian copula here
 
+        init_pose, init_cov, A, Q, C, R = self.target_params
         prop_copula_params, prop_marg_params = proposal_params
 
         mut = prop_marg_params[t,0:3]
         lint = prop_marg_params[t,3:6]
-        log_s2t = prop_marg_params[t,6:9]
-        s2t = tf.exp(log_s2t)
-        s2t = 0.01*tf.ones(3)
+        s2t = tf.diag_part(Q)
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
@@ -284,26 +278,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
                 x2_mb,
                 x3_mb])
 
-        # Some attempted debugging..
-        # x_curr = tf.debugging.check_numerics(x_curr, "X curr has problems")
-
-        prob = gc.prob(x_curr)
-        prob = tf.where(tf.is_nan(prob), tf.zeros_like(prob), prob)
-        prob = tf.debugging.check_numerics(prob, "Prob has errors")
         log_prob = gc.log_prob(x_curr)
-
-        # log_prob = tf.where(tf.is_nan(log_prob), (-(10.0e10))*tf.ones_like(log_prob), log_prob)
-        log_prob = tf.debugging.check_numerics(log_prob, "Log Prob has errors")
-        # prob = gc.prob(x_curr)
-        # prob = tf.Print(prob, [tf.count_nonzero(prob), prob.get_shape().as_list()],message="prob info")
-        # return log_prob
-        # lp0 = tfp.distributions.Normal(loc=mu[:,0], scale=tf.sqrt(s2t[0])).log_prob(tf.transpose(x_curr[:,0]))
-        # lp1 = tfp.distributions.Normal(loc=mu[:,1], scale=tf.sqrt(s2t[1])).log_prob(tf.transpose(x_curr[:,1]))
-        # lp2 = tfp.distributions.Normal(loc=mu[:,2], scale=tf.sqrt(s2t[2])).log_prob(tf.transpose(x_curr[:,2]))
-        # lp_total = lp0 + lp1 + lp2
-        # print("LP shape: ", lp_total.get_shape().as_list())
-        # return lp_total
-        return log_prob
+        return gc.log_prob(x_curr)
 
 
     def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):
@@ -326,17 +302,10 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         dim = Sigma.get_shape().as_list()[0]
         sign, logdet = tf.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
-        # Sigma = tf.Print(Sigma, [Sigma], summarize=10, message="Sigma values")
         Prec = tf.dtypes.cast(tf.linalg.inv(Sigma), dtype=tf.float32)
-        x = tf.debugging.check_numerics(x, "it was the x term!")
         first_term = x - mu
-        first_term = tf.debugging.check_numerics(first_term, "it was the first term!")
         second_term = tf.transpose(tf.matmul(Prec, tf.transpose(x-mu)))
-        second_term = tf.debugging.check_numerics(second_term, "it was the second term!")
         ls_term = -0.5*tf.reduce_sum(first_term*second_term,1)
-        # ls_term = tf.Print(ls_term, [ls_term], message="Squares term!")
-        ls_term = tf.debugging.check_numerics(ls_term, "it was the ls term!")
-        # log_norm = tf.Print(log_norm , [log_norm], message="Log norm term!")
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
     def log_target(self, t, x_curr, x_prev, observ):
@@ -353,29 +322,29 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         In the Gaussian case the multivariate normal with diagonal covariance equals:
         prod_{i=1}^{self.state_dim} p(x_curr[i] | x_prev[i]; proposal_params)
         """
-        x_curr = tf.debugging.check_numerics(x_curr, "X curr has issues...")
         init_pose, init_cov, A, Q, C, R = self.target_params
         mut = prop_marg_params[t,0:3]
         lint = prop_marg_params[t,3:6]
-        log_s2t = prop_marg_params[t,6:9]
-        # s2t = tf.exp(log_s2t)
-        s2t = 0.01*tf.ones(3)
+        s2t = tf.diag_part(Q)
         if t > 0:
             mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:
             mu = mut + lint*tf.transpose(init_pose)
         log_prob = self.log_normal(x_curr, mu, tf.diag(s2t))
-        log_prob = tf.debugging.check_numerics(log_prob, "Log marginal prob error!")
         return log_prob
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
+        """
+            Note: we don't actually need log_proposal_marginal
+            This is because log_proposal_copula computes the whole thing
+        """
         prop_copula_params, prop_marg_params = proposal_params
         prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
         prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
         cl = self.log_proposal_copula(t, x_curr, x_prev, observ, proposal_params)
-        cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
+        # cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
         cl = tf.debugging.check_numerics(cl, "copula log error")
-        cm = tf.debugging.check_numerics(cm, "marg log error")
+        # cm = tf.debugging.check_numerics(cm, "marg log error")
         return cl
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):

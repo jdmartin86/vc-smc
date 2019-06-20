@@ -46,14 +46,14 @@ class GaussianCopulaTriL(tfd.TransformedDistribution):
 
 class Concat(tfb.Bijector):
   """This bijector concatenates bijectors who act on scalars.
-  
+
   More specifically, given [F_0, F_1, ... F_n] which are scalar transformations,
-  this bijector creates a transformation which operates on the vector 
+  this bijector creates a transformation which operates on the vector
   [x_0, ... x_n] with the transformation [F_0(x_0), F_1(x_1) ..., F_n(x_n)].
-  
-  
+
+
   NOTE: This class does no error checking, so use with caution.
-  
+
   """
   def __init__(self, bijectors):
     self._bijectors = bijectors
@@ -61,30 +61,37 @@ class Concat(tfb.Bijector):
         forward_min_event_ndims=1,
         validate_args=False,
         name="ConcatBijector")
-    
+
   @property
   def bijectors(self):
     return self._bijectors
-    
+
   def _forward(self, x):
     split_xs = tf.split(x, len(self.bijectors), -1)
-    transformed_xs = [b_i.forward(x_i) for b_i, x_i in zip(
+    # kjd: added "clip by value" to ensure inverse CDF doesn't explode
+    # kjd: tested and necessary
+    # b_i.forward: [0, 1] -> R
+    # TODO: parameterize this clip
+    transformed_xs = [tf.clip_by_value(b_i.forward(x_i), clip_value_min=-10.0e5, clip_value_max=10.0e5) for b_i, x_i in zip(
         self.bijectors, split_xs)]
     return tf.concat(transformed_xs, -1)
-  
+
+  # b_i.inverse: R -> [0,1]
+  # kjd: tested and necessary
+  # TODO: parameterize this epsilon=10.0e-5
   def _inverse(self, y):
     split_ys = tf.split(y, len(self.bijectors), -1)
-    transformed_ys = [b_i.inverse(y_i) for b_i, y_i in zip(
+    transformed_ys = [tf.clip_by_value(b_i.inverse(y_i), clip_value_min=10.0e-5, clip_value_max=1.0-10.0e-5) for b_i, y_i in zip(
         self.bijectors, split_ys)]
     return tf.concat(transformed_ys, -1)
-  
+
   def _forward_log_det_jacobian(self, x):
     split_xs = tf.split(x, len(self.bijectors), -1)
     fldjs = [
         b_i.forward_log_det_jacobian(x_i, event_ndims=0) for b_i, x_i in zip(
             self.bijectors, split_xs)]
     return tf.squeeze(sum(fldjs), axis=-1)
-  
+
   def _inverse_log_det_jacobian(self, y):
     split_ys = tf.split(y, len(self.bijectors), -1)
     ildjs = [
@@ -94,12 +101,12 @@ class Concat(tfb.Bijector):
 
 class WarpedGaussianCopula(tfd.TransformedDistribution):
   """Application of a Gaussian Copula on a list of target marginals.
-  
+
   This implements an application of a Gaussian Copula. Given [x_0, ... x_n]
   which are distributed marginally (with CDF) [F_0, ... F_n],
   `GaussianCopula` represents an application of the Copula, such that the
   resulting multivariate distribution has the above specified marginals.
-  
+
   The marginals are specified by `marginal_bijectors`: These are
   bijectors whose `inverse` encodes the CDF and `forward` the inverse CDF.
   """

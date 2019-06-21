@@ -83,64 +83,42 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
     def init_marg_params(self):
         T = self.num_steps
         Dx = self.state_dim
-        marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
-                 1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
-                for t in range(T)])
+        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
+        #          1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
+        #         for t in range(T)])
+        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
+        #                                   1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
+        #                         for t in range(T)]
+        #                        .extend([self.rs.randn(Dl)]))
         return marg_params
 
     def init_dependency_params(self):
-        # State-component copula model represents a joint dependency distribution
-        # over the state components
+        # Copula model represents a joint dependency distribution
+        # over the latent variable components
         T = self.num_steps
-        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.copula_dim)).ravel() # correlation/covariance params
+        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.copula_dim)).ravel() # correlation params
                                   for t in range(T)])
         return copula_params
 
-    def generate_data(self):
-        init_pose, init_cov, A, Q, C, R = self.target_params
-        Dx = init_pose.get_shape().as_list()[0]
-        Dz = R.get_shape().as_list()[0]
+    # def generate_data(self):
+    #     init_pose, init_cov, A, Q, C, R = self.target_params
+    #     Dx = init_pose.get_shape().as_list()[0]
+    #     Dz = R.get_shape().as_list()[0]
 
-        x_true = []
-        z_true = []
+    #     x_true = []
+    #     z_true = []
 
-        for t in range(self.num_steps):
-            if t > 0:
-                x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.transition_model(x_true[t-1])),
-                                                                   covariance_matrix=Q).sample(seed=self.rs.randint(0,1234))))
-            else:
-                x_sample = init_pose
-                x_true.append(x_sample)
-            z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.measurement_model(x_true[t])),
-                                                               covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
+    #     for t in range(self.num_steps):
+    #         if t > 0:
+    #             x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.transition_model(x_true[t-1])),
+    #                                                                covariance_matrix=Q).sample(seed=self.rs.randint(0,1234))))
+    #         else:
+    #             x_sample = init_pose
+    #             x_true.append(x_sample)
+    #         z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.measurement_model(x_true[t])),
+    #                                                            covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
 
-        return x_true, z_true
-
-    def lgss_posterior_params(self, observ, T):
-        """
-            Apply a Kalman filter to the linear Gaussian state space model
-            Returns p(x_T | z_{1:T}) when supplied with z's and T
-        """
-        init_pose, init_cov, A, Q, C, R = self.target_params
-        Dx = init_pose.get_shape().as_list()[0]
-        Dy = R.get_shape().as_list()[0]
-        log_likelihood = 0.0
-        xfilt = tf.zeros(Dx)
-        Pfilt = tf.zeros([Dx, Dx])
-        xpred = init_pose
-        Ppred = init_cov
-        for t in range(self.num_steps):
-            if t > 0:
-                # Predict Step
-                xpred = self.transition_model(xfilt)
-                Ppred = tf.matmul(A, tf.matmul(Pfilt, tf.transpose(A))) + Q
-            # Update step
-            yt = observ[t] - self.measurement_model(xpred)
-            S = tf.matmul(C, tf.matmul(Ppred, tf.transpose(C))) + R
-            K = tf.transpose(tf.linalg.solve(S, tf.matmul(C, Ppred)))
-            xfilt = xpred + tf.matmul(K,yt)
-            Pfilt = Ppred - tf.matmul(K, tf.matmul(C,Ppred))
-        return xfilt, Pfilt
+    #     return x_true, z_true
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
         init_pose, init_cov, A, Q, C, R = self.target_params

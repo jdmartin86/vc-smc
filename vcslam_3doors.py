@@ -6,6 +6,7 @@ import plotting
 import tensorflow_probability as tfp
 # tfb = tfp.bijectors
 import correlation_cholesky as cc
+from scipy.special import comb
 
 from vcsmc import *
 import vcslam_agent
@@ -44,6 +45,8 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         # else:
         #     self.latent_dim = latent_dim
         self.latent_dim = (self.state_dim + self.landmark_dim*self.num_landmarks)
+        # A copula over N variables has (N choose 2) correlation parameters
+        self.copula_dim = int(comb(self.latent_dim,2))
         # Observation dimensionality (direct observations of x_door)
         self.observ_dim = observ_dim
         # Proposal params
@@ -69,11 +72,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return x + motion_mean
 
     def measurement_model(self, x):
-        init_pose, init_cov, A, Q, C, R = self.target_params
-        return tf.matmul(C, x)
+        return 0.
 
     def get_dependency_param_shape(self):
-        return [self.num_steps, self.state_dim]
+        return [self.num_steps, self.copula_dim]
 
     def get_marginal_param_shape(self):
         return [self.num_steps, self.state_dim*3]
@@ -90,7 +92,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         # State-component copula model represents a joint dependency distribution
         # over the state components
         T = self.num_steps
-        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.latent_dim)).ravel() # correlation/covariance params
+        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.copula_dim)).ravel() # correlation/covariance params
                                   for t in range(T)])
         return copula_params
 
@@ -302,16 +304,15 @@ if __name__ == '__main__':
 
 
     # True target parameters
-    # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
-
-    lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_var, meas_var = self.target_params
     lm1_prior_mean = 0.0
     lm1_prior_var = 0.01
     lm2_prior_mean = 2.0
     lm2_prior_var = 0.01
-    lm3_prior_mean = 4.0
+    lm3_prior_mean = 6.0
     lm3_prior_var = 0.01
-    A = 1.1*tf.eye(3,3,dtype=np.float32)
+    motion_mean = 2.0
+    motion_var = 0.1
+    meas_var = 0.1
     target_params = [lm1_prior_mean, lm1_prior_var,
                      lm2_prior_mean, lm2_prior_var,
                      lm3_prior_mean, lm3_prior_var,
@@ -323,11 +324,12 @@ if __name__ == '__main__':
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
-    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
+    td_agent = ThreeDoorsAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
 
     # Generate observations TODO: change to numpy implementation
-    x_true, z_true = td_agent.generate_data()
-    xt_vals, zt_vals = sess.run([x_true, z_true])
+    # x_true, z_true = td_agent.generate_data()
+    # xt_vals, zt_vals = sess.run([x_true, z_true])
+    zt_vals = None
 
     for seed in range(num_seeds):
         sess = tf.Session()

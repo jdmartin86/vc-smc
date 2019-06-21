@@ -90,15 +90,8 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         # State-component copula model represents a joint dependency distribution
         # over the state components
         T = self.num_steps
-        Dx = self.state_dim
-        # Each correlation param should be in [-1,1] So we compute the actual
-        # correlation param as (1 - exp(-x)) / (1 + exp(-x)) which you can
-        # verify as 2*sigmoid(x) - 1 where sigmoid(x): R -> [0,1] = 1 / (1 +
-        # exp(-x)) and we just rescale that to be [-1,1] I think there's a
-        # better way I just need to think about it for a bit - Kevin
-        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(Dx)).ravel() # correlation/covariance params
+        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.latent_dim)).ravel() # correlation/covariance params
                                   for t in range(T)])
-        # copula_params = np.array([np.zeros(Dx).ravel() for t in range(T)])
         return copula_params
 
     def generate_data(self):
@@ -199,38 +192,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         # sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
         return gc.sample(x_prev.get_shape().as_list()[0])
 
-    def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):
-        """
-        Returns the log probability from the state-landmark copula
-        This function requires the multi-dimensional CDF of states,
-        and the mutli-dimensional CDF of all M landmarks
-        """
-        # TODO: implement log of multi-dimensional state and landmark copula density
-        # Need to split the tensor components into the state and land marks,
-        # transform with their CDFs and
-        # evaluate on the copula, and take the log
-        #s_curr_tilde = self.mv_state_cdf(s_curr,x_prev,observ)
-
-        # apply CDF for all landmarks (num_landmarks,landmark_dim)
-        #l_curr_tilde = self.mv_lndmk_cdf(l_curr,x_prev,observ)
-
-        # apply copula model
-        #C_sl = self.copula_sl(s_curr_tilde,l_curr_tilde)
-
-        # differentiate to get c?
-        num_particles = x_curr.get_shape().as_list()[0]
-        # xx_dist = NormalCDF()
-        # x_tilde =
-        return tf.zeros(shape=(num_particles),dtype=tf.float32)
-
-    def log_proposal_copula_ll(self,t,x_curr,x_prev,observ,proposal_params):
-        """
-        Log probability from the landmark-landmark copula
-        """
-        num_particles = x_curr.get_shape().as_list()[0]
-        return tf.zeros(shape=(num_particles),dtype=tf.float32)
-
-    def log_proposal_copula_s(self,t,x_curr,x_prev,observ,proposal_params):
+    def log_proposal(self,t,x_curr,x_prev,observ,proposal_params):
         """
         Log probability from the state-component copula
         """
@@ -279,23 +241,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         return gc.log_prob(x_curr)
 
-
-    def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):
-        """
-        Log probability from the landmark-component copula
-        """
-        num_particles = x_curr.get_shape().as_list()[0]
-        return tf.zeros(shape=(num_particles),dtype=tf.float32)
-
-    def log_proposal_copula(self,t,x_curr,x_prev,observ,proposal_params):
-        """
-        Returns the log probability from the copula model described in Equation 4
-        """
-        return self.log_proposal_copula_sl(t,x_curr,x_prev,observ,proposal_params) + \
-            self.log_proposal_copula_ll(t,x_curr,x_prev,observ,proposal_params) + \
-            self.log_proposal_copula_s(t,x_curr,x_prev,observ,proposal_params) + \
-            self.log_proposal_copula_l(t,x_curr,x_prev,observ,proposal_params)
-
     def log_normal(self, x, mu, Sigma):
         dim = Sigma.get_shape().as_list()[0]
         sign, logdet = tf.linalg.slogdet(Sigma)
@@ -319,17 +264,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                self.log_normal(x_curr[:,2], lm2_prior_mean, lm2_prior_var) + \
                self.log_normal(x_curr[:,3], lm3_prior_mean, lm3_prior_var)
         return logF + logG + logH
-
-    def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
-        """
-            Note: we don't actually need log_proposal_marginal
-            This is because log_proposal_copula computes the whole thing
-        """
-        prop_copula_params, prop_marg_params = proposal_params
-        prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
-        prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
-        cl = self.log_proposal_copula(t, x_curr, x_prev, observ, proposal_params)
-        return cl
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
@@ -395,13 +329,6 @@ if __name__ == '__main__':
     x_true, z_true = td_agent.generate_data()
     xt_vals, zt_vals = sess.run([x_true, z_true])
 
-    # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
-    # TODO: change to numpy implementation
-    post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
-    p_mu, p_cov = sess.run([post_mean, post_cov])
-    post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
-    post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
-
     for seed in range(num_seeds):
         sess = tf.Session()
         tf.set_random_seed(seed)
@@ -432,12 +359,11 @@ if __name__ == '__main__':
         my_samples = train_sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
         print(samples_np.shape)
-        plotting.plot_dist(samples_np,post_values)
 
         # plots TODO: clean up more and add other relevant plots
         xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
         zt_vals = np.array(zt_vals)
-        plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
-        plotting.plot_dist(samples_np,post_values)
+        plotting.plot_kde(samples_np,None,xt_vals,zt_vals)
+        plotting.plot_dist(samples_np,None)
         # plt.show()
 

@@ -65,8 +65,8 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                 cg.NormalCDF(loc=0., scale=1.)])
 
     def transition_model(self, x):
-        init_pose, init_cov, A, Q, C, R = self.target_params
-        return tf.matmul(A, x)
+        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        return x + motion_mean
 
     def measurement_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -307,30 +307,18 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
     def log_target(self, t, x_curr, x_prev, observ):
-        init_pose, init_cov, A, Q, C, R = self.target_params
+        # init_pose, init_cov, A, Q, C, R = self.target_params
+        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
         if t > 0:
-            logF = self.log_normal(x_curr, tf.transpose(self.transition_model(tf.transpose(x_prev))), Q)
-        else:
-            logF = self.log_normal(x_curr, tf.transpose(init_pose), init_cov)
-        # logG = self.log_normal(tf.transpose(self.measurement_model(tf.transpose(x_curr))), tf.transpose(tf.convert_to_tensor(observ[t], dtype=tf.float32)), R)
-        # TODO: replace with Gaussian mixture
-        return logF + logG
-
-    def log_proposal_marginal(self, t, x_curr, x_prev, observ, prop_marg_params):
-        """
-        In the Gaussian case the multivariate normal with diagonal covariance equals:
-        prod_{i=1}^{self.state_dim} p(x_curr[i] | x_prev[i]; proposal_params)
-        """
-        init_pose, init_cov, A, Q, C, R = self.target_params
-        mut = prop_marg_params[t,0:3]
-        lint = prop_marg_params[t,3:6]
-        s2t = tf.diag_part(Q)
-        if t > 0:
-            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
-        else:
-            mu = mut + lint*tf.transpose(init_pose)
-        log_prob = self.log_normal(x_curr, mu, tf.diag(s2t))
-        return log_prob
+            logF = self.log_normal(x_curr, tf.transpose(self.transition_model(tf.transpose(x_prev))), motion_var)
+        if t == 0 or t == 1:
+            logG = tf.log((1./3.)*tf.exp(self.log_normal(x_curr[:,0], x_curr[:,1], meas_var)) + \
+                          (1./3.)*tf.exp(self.log_normal(x_curr[:,0], x_curr[:,2], meas_var)) + \
+                          (1./3.)*tf.exp(self.log_normal(x_curr[:,0], x_curr[:,3], meas_var)))
+        logH = self.log_normal(x_curr[:,1], lm1_prior_mean, lm1_prior_var) + \
+               self.log_normal(x_curr[:,2], lm2_prior_mean, lm2_prior_var) + \
+               self.log_normal(x_curr[:,3], lm3_prior_mean, lm3_prior_var)
+        return logF + logG + logH
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
         """
@@ -341,9 +329,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
         prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
         cl = self.log_proposal_copula(t, x_curr, x_prev, observ, proposal_params)
-        # cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
-        cl = tf.debugging.check_numerics(cl, "copula log error")
-        # cm = tf.debugging.check_numerics(cm, "marg log error")
         return cl
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
@@ -384,16 +369,20 @@ if __name__ == '__main__':
 
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
-    init_pose = tf.ones([3,1],dtype=np.float32)
-    init_cov = 0.01*tf.eye(3,3,dtype=np.float32)
+
+    lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_var, meas_var = self.target_params
+    lm1_prior_mean = 0.0
+    lm1_prior_var = 0.01
+    lm2_prior_mean = 2.0
+    lm2_prior_var = 0.01
+    lm3_prior_mean = 4.0
+    lm3_prior_var = 0.01
     A = 1.1*tf.eye(3,3,dtype=np.float32)
-    Q = 0.01*tf.eye(3,3,dtype=np.float32)
-    # This was an attempt to make a correlated covariance matrix, it kind of works
-    # L = tf.constant([[0.5, 0.0, 0.0], [0.1, 0.1234, 0.0], [1.0, 0.8591, 2.0]], dtype=tf.float32)
-    # Q = 0.5*(L + tf.transpose(L))
-    C = tf.eye(2,3,dtype=np.float32)
-    R = 0.01*tf.eye(2,2,dtype=np.float32)
-    target_params = [init_pose,init_cov,A,Q,C,R]
+    target_params = [lm1_prior_mean, lm1_prior_var,
+                     lm2_prior_mean, lm2_prior_var,
+                     lm3_prior_mean, lm3_prior_var,
+                     motion_mean, motion_var,
+                     meas_var]
 
     # Create the session
     sess = tf.Session()

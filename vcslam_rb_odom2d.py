@@ -359,8 +359,13 @@ if __name__ == '__main__':
     num_train_particles = 100
     # Number of particles to use during SMC query
     num_query_particles = 1000000
-    # Number of iterations to fit the proposal parameters
-    num_train_steps = 2000
+    # Number of EM iterations
+    num_train_steps = 1000
+    # Number of iterations to fit the dependency parameters
+    num_dependency_train_steps = 1
+    # Number of iterations to fit the marginal parameters
+    num_marginal_train_steps = 1
+    
     # Learning rate for the marginal
     lr_m = 0.01
     # Learning rate for the copula
@@ -419,6 +424,8 @@ if __name__ == '__main__':
                      observ = zt_vals,
                      num_particles = num_train_particles,
                      num_train_steps = num_train_steps,
+                     num_dependency_train_steps = num_dependency_train_steps,
+                     num_marginal_train_steps = num_marginal_train_steps,
                      lr_d = lr_d,
                      lr_m = lr_m,
                      summary_writer = writer)

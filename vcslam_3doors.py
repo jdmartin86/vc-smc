@@ -83,6 +83,12 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
     def init_marg_params(self):
         T = self.num_steps
         Dx = self.state_dim
+        """
+        marginal params for this problem are the means of the Gaussians at each time step (so 3 gaussians * T time steps) as well as the landmark location means (so 3 * num landmarks)
+
+        might also add the bias term?
+
+        """
         # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
         #          1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
         #         for t in range(T)])

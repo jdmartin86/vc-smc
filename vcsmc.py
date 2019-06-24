@@ -15,8 +15,8 @@ class VCSLAM():
                 observ,
                 num_particles,
                 num_train_steps = 1000,
-                num_dependency_train_steps = 100,
-                num_marginal_train_steps = 100,
+                num_dependency_train_steps = 1,
+                num_marginal_train_steps = 1,
                 lr_d = 0.0001,
                 lr_m = 0.0001,
                 adapt_resamp = False,
@@ -57,7 +57,7 @@ class VCSLAM():
         self.num_dependency_train_steps = num_dependency_train_steps
         # Number of iterations to fit the marginal parameters
         self.num_marginal_train_steps = num_marginal_train_steps
-        
+
         # Dependency model learning rate
         self.lr_d = lr_d
         # Marginal model learning rate
@@ -276,32 +276,32 @@ class VCSLAM():
             print("    Iter    |    ELBO    ")
             # Expectation Maximization loop
             for i in range(self.num_train_steps):
-                
+
                 # Train the dependency model
                 for it in range(self.num_dependency_train_steps):
                     _, loss_curr = self.sess.run([learn_dependency, loss])
 
                     if np.isnan(loss_curr):
-                        print("NAN loss:", it)
+                        print("NAN loss:", i, it)
                         return None
 
                     # dep_losses[it] = loss_curr
 
                 # Train the marginal model
-                for it in range(self.num_train_steps):
+                for it in range(self.num_marginal_train_steps):
                     _, loss_curr, summary_str = self.sess.run([learn_marginal, loss, summary_op])
 
                     if np.isnan(loss_curr):
-                        print("NAN loss:", it)
+                        print("NAN loss:", i, it)
                         return None
 
                     # mar_losses[it] = loss_curr
-                    
+
                 #self.summary_writer.add_summary(summary_str, it)
-                if it % iter_display == 0:
-                    message = "{:15}|{!s:20}".format(it, -loss_curr)
+                if i % iter_display == 0:
+                    message = "{:15}|{!s:20}".format(i, -loss_curr)
                     print(message)
 
         print("Final marginal params:\n", marginal_params.eval(session=self.sess))
-                            
+
         return proposal_params, self.sess

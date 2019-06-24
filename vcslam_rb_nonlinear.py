@@ -66,7 +66,11 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
     def transition_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
-        return tf.matmul(A, x)
+
+        y0 = x[0] + 0.1*tf.cos(x[2])  
+        y1 = x[1] + 0.1*tf.sin(x[2])
+        y2 = x[2]
+        return tf.concat([y0[None,:],y1[None,:],y2[None,:]],0)
 
     def measurement_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
@@ -158,7 +162,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         # Use "bootstrap" method for s2t of univariates
         s2t = tf.diag_part(Q)
-
         if t > 0:
             mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
         else:

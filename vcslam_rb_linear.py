@@ -182,7 +182,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
         gc = cg.WarpedGaussianCopula(
             loc=[0., 0., 0.],
-            scale_tril=L_mat, # TODO This is currently just eye(3), use L_mat!
+            scale_tril=L_mat, 
             marginal_bijectors=[
                 x1_cdf,
                 x2_cdf,
@@ -331,19 +331,19 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             This is because log_proposal_copula computes the whole thing
         """
         prop_copula_params, prop_marg_params = proposal_params
-        prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
-        prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
+        #prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
+        #prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
         cl = self.log_proposal_copula(t, x_curr, x_prev, observ, proposal_params)
         # cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
-        cl = tf.debugging.check_numerics(cl, "copula log error")
+        #cl = tf.debugging.check_numerics(cl, "copula log error")
         # cm = tf.debugging.check_numerics(cm, "marg log error")
         return cl
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
-        target_log = tf.debugging.check_numerics(target_log, "Target log error")
+        #target_log = tf.debugging.check_numerics(target_log, "Target log error")
         prop_log = self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
-        prop_log = tf.debugging.check_numerics(prop_log, "Proposal log error")
+        #prop_log = tf.debugging.check_numerics(prop_log, "Proposal log error")
         return target_log - prop_log
 
 if __name__ == '__main__':

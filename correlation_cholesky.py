@@ -147,7 +147,7 @@ class CorrelationCholesky(tfb.Bijector):
 
     # Set diagonal to 1s.
     n = y.get_shape().as_list()[-1]
-    diag = tf.ones(batch_shape, dtype=x.dtype)
+    diag = tf.ones(n, dtype=x.dtype)
     y = tf.linalg.set_diag(y, diag)
 
     # Normalize each row to have Euclidean (L2) norm 1.

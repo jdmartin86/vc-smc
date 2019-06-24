@@ -46,7 +46,7 @@ class GaussianMixtureCDF(tfb.Bijector):
     self.mixture_dist = tfd.Mixture(
       cat = tfd.Categorical(probs=ps),
       components=[tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)])
-    super(MixtureCDF, self).__init__(
+    super(GaussianMixtureCDF, self).__init__(
         forward_min_event_ndims=0,
         validate_args=False,
         name="GaussianMixtureCDF")

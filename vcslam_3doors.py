@@ -22,7 +22,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                  target_params,
                  num_steps=3,
                  state_dim=1,
-                 num_landmarks=2,
+                 num_landmarks=3,
                  landmark_dim=1,
                  latent_dim=None,
                  observ_dim=1,
@@ -59,13 +59,13 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         self.rs = rs
 
         # initialize dependency models
-        self.copula_s = cg.WarpedGaussianCopula(
-            loc = tf.zeros(shape=self.state_dim, dtype=tf.float32),
-            scale_tril = tf.eye(self.state_dim, dtype=tf.float32),
-            marginal_bijectors=[
-                cg.NormalCDF(loc=0., scale=1.),
-                cg.NormalCDF(loc=0., scale=1.),
-                cg.NormalCDF(loc=0., scale=1.)])
+        # self.copula_s = cg.WarpedGaussianCopula(
+        #     loc = tf.zeros(shape=self.state_dim, dtype=tf.float32),
+        #     scale_tril = tf.eye(self.state_dim, dtype=tf.float32),
+        #     marginal_bijectors=[
+        #         cg.NormalCDF(loc=0., scale=1.),
+        #         cg.NormalCDF(loc=0., scale=1.),
+        #         cg.NormalCDF(loc=0., scale=1.)])
 
     def transition_model(self, x):
         lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
@@ -78,13 +78,13 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return [self.num_steps, self.copula_dim]
 
     def get_marginal_param_shape(self):
-        return [self.num_steps, self.state_dim*3]
+        return [self.num_steps+1, self.state_dim*3]
 
     def init_marg_params(self):
         T = self.num_steps
         Dx = self.state_dim
         """
-        marginal params for this problem are the means of the Gaussians at each time step (so 3 gaussians * T time steps) as well as the landmark location means (so 3 * num landmarks)
+        marginal params for this problem are the means of the Gaussians at each time step (so 3 gaussians * T time steps) as well as the landmark location means (so num landmarks)
 
         might also add the bias term?
 
@@ -96,6 +96,9 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #                                   1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
         #                         for t in range(T)]
         #                        .extend([self.rs.randn(Dl)]))
+        marg_params = np.array([np.array([self.prop_scale * self.rs.randn(3*Dx)]).ravel() # 3 MoG means per time step
+                                          for t in range(T)]
+                                         .extend(self.rs.randn(self.num_landmarks)))
         return marg_params
 
     def init_dependency_params(self):
@@ -127,38 +130,46 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
     #     return x_true, z_true
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
-        init_pose, init_cov, A, Q, C, R = self.target_params
+        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        T = self.num_steps
         num_particles = x_prev.get_shape().as_list()[0]
         prop_copula_params = proposal_params[0]
         prop_marg_params = proposal_params[1]
 
-        mut = prop_marg_params[t,0:3]
-        lint = prop_marg_params[t,3:6]
+        mu1t = prop_marg_params[t,0]
+        mu2t = prop_marg_params[t,1]
+        mu3t = prop_marg_params[t,2]
+        l1m = prop_marg_params[T,0]
+        l2m = prop_marg_params[T,1]
+        l3m = prop_marg_params[T,2]
 
-        # Use "bootstrap" method for s2t of univariates
-        s2t = tf.diag_part(Q)
-
+        if t == 0:
+            mu1 = mu1t
+            mu2 = mu2t
+            mu3 = mu3t
         if t > 0:
-            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
-        else:
-            mu = mut + lint*tf.transpose(init_pose)
+            mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
+            mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
+            mu3 = mu3t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
+
+        # if t > 0:
+        #     mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
+        # else:
+        #     mu = mut + lint*tf.transpose(init_pose)
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
         # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
         r_vec = prop_copula_params[t,:]
         L_mat = cc.CorrelationCholesky().forward(r_vec)
+        print("L Mat shape: ", L_mat.get_shape().as_list())
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
-        # x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
-        # x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
-        # x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
-        # x_cdf = cg.MixtureCDF(loc=tf.transpose([mu[]]))
-        x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=tf.sqrt(s2t[0]))
-        l1_cdf = cg.NormalCDF(loc=mul1, scale=tf.sqrt(s2t[0]))
-        l2_cdf = cg.NormalCDF(loc=mul2, scale=tf.sqrt(s2t[0]))
-        l3_cdf = cg.NormalCDF(loc=mul3, scale=tf.sqrt(s2t[0]))
+        x_cdf = cg.GaussianMixtureCDF(ps=[1./3., 1./3., 1./3.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
+        l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
+        l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
+        l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
@@ -166,7 +177,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
         gc = cg.WarpedGaussianCopula(
             loc=[0., 0., 0.],
-            scale_tril=L_mat, # TODO This is currently just eye(3), use L_mat!
+            scale_tril=L_mat,
             marginal_bijectors=[
                 x_cdf,
                 l1_cdf,
@@ -182,14 +193,31 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         """
         Log probability from the state-component copula
         """
-        # TODO: implement Gaussian copula here
-
-        init_pose, init_cov, A, Q, C, R = self.target_params
         prop_copula_params, prop_marg_params = proposal_params
 
-        mut = prop_marg_params[t,0:3]
-        lint = prop_marg_params[t,3:6]
-        s2t = tf.diag_part(Q)
+        # Extract params here
+        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+
+        T = self.num_steps
+        num_particles = x_prev.get_shape().as_list()[0]
+        prop_copula_params = proposal_params[0]
+        prop_marg_params = proposal_params[1]
+
+        mu1t = prop_marg_params[t,0]
+        mu2t = prop_marg_params[t,1]
+        mu3t = prop_marg_params[t,2]
+        l1m = prop_marg_params[T,0]
+        l2m = prop_marg_params[T,1]
+        l3m = prop_marg_params[T,2]
+
+        if t == 0:
+            mu1 = mu1t
+            mu2 = mu2t
+            mu3 = mu3t
+        if t > 0:
+            mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
+            mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
+            mu3 = mu3t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
@@ -198,16 +226,9 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         r_vec = prop_copula_params[t,:]
         L_mat = cc.CorrelationCholesky().forward(r_vec)
 
-        # This is how we properly compute the marginal parameters based on the
-        # model c.f. log_proposal_marginal function
-        if t > 0:
-            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
-        else:
-            mu = mut + lint*tf.transpose(init_pose)
-
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs and GaussianMixtureCDF
-        x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=tf.sqrt(s2t[0]))
+        x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
         l1_cdf = cg.NormalCDF(loc=mul1, scale=tf.sqrt(s2t[0]))
         l2_cdf = cg.NormalCDF(loc=mul2, scale=tf.sqrt(s2t[0]))
         l3_cdf = cg.NormalCDF(loc=mul3, scale=tf.sqrt(s2t[0]))

@@ -170,7 +170,8 @@ class EmpiricalCDF(tfb.Bijector):
 
   def _forward(self, y):
     # Inverse CDF of empirical distribution.
-    return tfp.stats.percentile(self.dist.samples, y, interpolation=self.interp)
+    y_shape=y.get_shape()
+    return tf.reshape(tfp.stats.percentile(self.dist.samples, tf.reshape(y,[-1]), interpolation=self.interp), y_shape)
 
   def _inverse(self, x):
     # CDF of empirical distribution.
@@ -193,12 +194,16 @@ class EmpGaussianMixtureCDF(EmpiricalCDF):
     print(ps)
     print(locs)
     print(scales)
+    cat_dist = tfd.Categorical(probs=ps)
+    print(cat_dist)
+    comps = [tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)]
+    print(comps)
     mixture_dist = tfd.Mixture(
       cat = tfd.Categorical(probs=ps),
       components=[tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)])
     samples = mixture_dist.sample(sample_shape=n_samples)
     super(EmpGaussianMixtureCDF, self).__init__(
-        samples=samples,
+        samples=tf.transpose(samples),
         interp='linear')
 
   # def _forward(self, y):

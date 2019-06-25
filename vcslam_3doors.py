@@ -176,7 +176,9 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         print("mu1 shape: ", mu1.get_shape().as_list())
         print("mu2 shape: ", mu2.get_shape().as_list())
         print("mu3 shape: ", mu3.get_shape().as_list())
-        x_cdf = cg.EmpGaussianMixtureCDF(ps=[1./3., 1./3., 1./3.],
+        ps = tf.transpose(tf.constant([[1./3.], [1./3.], [1./3.]])*tf.ones([1,100]))
+        print(ps)
+        x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
                                          locs=[mu1, mu2, mu3],
                                          scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0]])
         # x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
@@ -224,9 +226,9 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         l3m = prop_marg_params[T,2]
 
         if t == 0:
-            mu1 = mu1t
-            mu2 = mu2t
-            mu3 = mu3t
+            mu1 = mu1t + tf.zeros(num_particles)
+            mu2 = mu2t + tf.zeros(num_particles)
+            mu3 = mu3t + tf.zeros(num_particles)
         if t > 0:
             mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
             mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
@@ -242,10 +244,21 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs and GaussianMixtureCDF
         # x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
-        x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
+
+        ps = tf.transpose(tf.constant([[1./3.], [1./3.], [1./3.]])*tf.ones([1,100]))
+        x_scale = tf.sqrt(motion_var)
+        x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
+                                         locs=[mu1, mu2, mu3],
+                                         scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0]])
+        # x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
         l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
         l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
         l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
+
+        # x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
+        # l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
+        # l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
+        # l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and

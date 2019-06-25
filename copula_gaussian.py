@@ -30,6 +30,8 @@ class NormalCDF(tfb.Bijector):
     return self.normal_dist.cdf(x)
 
   def _inverse_log_det_jacobian(self, x):
+    print("Normal cdf inv log det x shape: ", x.get_shape().as_list())
+    print("normal cdf log prob shape: ", self.normal_dist.log_prob(x).get_shape().as_list())
     # Log PDF of the normal distribution.
     return self.normal_dist.log_prob(x)
 
@@ -179,6 +181,8 @@ class EmpiricalCDF(tfb.Bijector):
 
   def _inverse_log_det_jacobian(self, x):
     # Log PMF of the empirical distribution.
+    print("inv log det jac x shape: ", x.get_shape().as_list())
+    print("shape log prob: ", self.dist.log_prob(x).get_shape().as_list())
     return self.dist.log_prob(x)
 
 class EmpGaussianMixtureCDF(EmpiricalCDF):
@@ -190,7 +194,7 @@ class EmpGaussianMixtureCDF(EmpiricalCDF):
   tersely this way).
 
   """
-  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=1000):
+  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=10):
     print(ps)
     print(locs)
     print(scales)
@@ -202,8 +206,9 @@ class EmpGaussianMixtureCDF(EmpiricalCDF):
       cat = tfd.Categorical(probs=ps),
       components=[tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)])
     samples = mixture_dist.sample(sample_shape=n_samples)
+    print("Sample shape!", samples.get_shape().as_list())
     super(EmpGaussianMixtureCDF, self).__init__(
-        samples=tf.transpose(samples),
+        samples=samples,
         interp='linear')
 
   # def _forward(self, y):

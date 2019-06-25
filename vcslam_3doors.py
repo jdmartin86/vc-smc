@@ -11,6 +11,10 @@ from scipy.special import comb
 from vcsmc import *
 import vcslam_agent
 
+# Temporary
+import seaborn as sbs
+import matplotlib.pyplot as plt
+
 import copula_gaussian as cg
 
 # Remove warnings
@@ -97,8 +101,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #                         for t in range(T)]
         #                        .extend([self.rs.randn(Dl)]))
         marg_params = np.array([np.array([self.prop_scale * self.rs.randn(3*Dx)]).ravel() # 3 MoG means per time step
-                                          for t in range(T)]
-                                         .extend(self.rs.randn(self.num_landmarks)))
+                                          for t in range(T+1)])
         return marg_params
 
     def init_dependency_params(self):
@@ -144,9 +147,9 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         l3m = prop_marg_params[T,2]
 
         if t == 0:
-            mu1 = mu1t
-            mu2 = mu2t
-            mu3 = mu3t
+            mu1 = mu1t + tf.zeros(num_particles)
+            mu2 = mu2t + tf.zeros(num_particles)
+            mu3 = mu3t + tf.zeros(num_particles)
         if t > 0:
             mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
             mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
@@ -166,7 +169,17 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs
-        x_cdf = cg.GaussianMixtureCDF(ps=[1./3., 1./3., 1./3.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
+        # x_cdf = cg.GaussianMixtureCDF(ps=[1./3., 1./3., 1./3.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
+        # x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1], scales=[tf.sqrt(motion_var)])
+        # x_cdf = cg.EmpGaussianMixtureCDF()
+        x_scale = tf.sqrt(motion_var)
+        print("mu1 shape: ", mu1.get_shape().as_list())
+        print("mu2 shape: ", mu2.get_shape().as_list())
+        print("mu3 shape: ", mu3.get_shape().as_list())
+        x_cdf = cg.EmpGaussianMixtureCDF(ps=[1./3., 1./3., 1./3.],
+                                         locs=[mu1, mu2, mu3],
+                                         scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0]])
+        # x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
         l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
         l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
         l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
@@ -176,7 +189,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #  self.copula.marginal_bijectors in each iteration NOTE: I add
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
         gc = cg.WarpedGaussianCopula(
-            loc=[0., 0., 0.],
+            loc=[0., 0., 0., 0.],
             scale_tril=L_mat,
             marginal_bijectors=[
                 x_cdf,
@@ -228,17 +241,18 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs and GaussianMixtureCDF
-        x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
-        l1_cdf = cg.NormalCDF(loc=mul1, scale=tf.sqrt(s2t[0]))
-        l2_cdf = cg.NormalCDF(loc=mul2, scale=tf.sqrt(s2t[0]))
-        l3_cdf = cg.NormalCDF(loc=mul3, scale=tf.sqrt(s2t[0]))
+        # x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
+        x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
+        l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
+        l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
+        l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
         #  self.copula.marginal_bijectors in each iteration NOTE: I add
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
         gc = cg.WarpedGaussianCopula(
-            loc=[0., 0., 0.],
+            loc=[0., 0., 0., 0.],
             scale_tril=L_mat, # TODO This is currently just eye(3), use L_mat!
             marginal_bijectors=[
                 x_cdf,
@@ -261,16 +275,23 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
     def log_target(self, t, x_curr, x_prev, observ):
         # init_pose, init_cov, A, Q, C, R = self.target_params
         lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        print("X curr shape: ", x_curr.get_shape().as_list())
+        x_prev_samples = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[0]]))
+        x_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[0]]))
+        l1_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[1]]))
+        l2_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[2]]))
+        l3_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[3]]))
+        print("x sample shape: ", x_samples.get_shape().as_list())
         if t > 0:
-            logF = self.log_normal(x_curr, tf.transpose(self.transition_model(tf.transpose(x_prev))), motion_var)
+            logG = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
         if t == 0 or t == 1:
-            logG = tf.log((1./3.)*tf.exp(self.log_normal(x_curr[:,0], x_curr[:,1], meas_var)) + \
-                          (1./3.)*tf.exp(self.log_normal(x_curr[:,0], x_curr[:,2], meas_var)) + \
-                          (1./3.)*tf.exp(self.log_normal(x_curr[:,0], x_curr[:,3], meas_var)))
-        logH = self.log_normal(x_curr[:,1], lm1_prior_mean, lm1_prior_var) + \
-               self.log_normal(x_curr[:,2], lm2_prior_mean, lm2_prior_var) + \
-               self.log_normal(x_curr[:,3], lm3_prior_mean, lm3_prior_var)
-        return logF + logG + logH
+            logG = tf.log((1./3.)*tf.exp(self.log_normal(x_samples, l1_samples, meas_var)) + \
+                          (1./3.)*tf.exp(self.log_normal(x_samples, l2_samples, meas_var)) + \
+                          (1./3.)*tf.exp(self.log_normal(x_samples, l3_samples, meas_var)))
+        logH = self.log_normal(l1_samples, lm1_prior_mean, lm1_prior_var) + \
+               self.log_normal(l2_samples, lm2_prior_mean, lm2_prior_var) + \
+               self.log_normal(l3_samples, lm3_prior_mean, lm3_prior_var)
+        return logG + logH
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
@@ -287,7 +308,7 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 10
+    num_steps = 1
     # Number of particles to use during training
     num_train_particles = 100
     # Number of particles to use during SMC query
@@ -309,15 +330,15 @@ if __name__ == '__main__':
 
 
     # True target parameters
-    lm1_prior_mean = 0.0
-    lm1_prior_var = 0.01
-    lm2_prior_mean = 2.0
-    lm2_prior_var = 0.01
-    lm3_prior_mean = 6.0
-    lm3_prior_var = 0.01
-    motion_mean = 2.0
-    motion_var = 0.1
-    meas_var = 0.1
+    lm1_prior_mean = tf.zeros([1,1],dtype=tf.float32)
+    lm1_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
+    lm2_prior_mean = 2.0*tf.ones([1,1],dtype=tf.float32)
+    lm2_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
+    lm3_prior_mean = 6.0*tf.ones([1,1],dtype=tf.float32)
+    lm3_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
+    motion_mean = 2.0*tf.ones([1,1],dtype=tf.float32)
+    motion_var = 0.1*tf.ones([1,1],dtype=tf.float32)
+    meas_var = 0.1*tf.ones([1,1],dtype=tf.float32)
     target_params = [lm1_prior_mean, lm1_prior_var,
                      lm2_prior_mean, lm2_prior_var,
                      lm3_prior_mean, lm3_prior_var,
@@ -368,9 +389,14 @@ if __name__ == '__main__':
         print(samples_np.shape)
 
         # plots TODO: clean up more and add other relevant plots
-        xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-        zt_vals = np.array(zt_vals)
-        plotting.plot_kde(samples_np,None,xt_vals,zt_vals)
-        plotting.plot_dist(samples_np,None)
-        # plt.show()
+        # xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
+        # zt_vals = np.array(zt_vals)
+        # plotting.plot_kde(samples_np,None,xt_vals,zt_vals)
+        # plotting.plot_dist(samples_np,None)
+        sbs.distplot(samples_np[:,0], color='purple')
+        sbs.distplot(samples_np[:,1], color='red')
+        sbs.distplot(samples_np[:,2], color='green')
+        sbs.distplot(samples_np[:,3], color='blue')
+
+        plt.show()
 

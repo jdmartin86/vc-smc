@@ -149,32 +149,66 @@ class WarpedGaussianCopula(tfd.TransformedDistribution):
 
 class EmpiricalCDF(tfb.Bijector):
   """Bijector that encodes normal CDF and inverse CDF functions.
-  
+
   We follow the convention that the `inverse` represents the CDF
   and `forward` the inverse CDF (the reason for this convention is
   that inverse CDF methods for sampling are expressed a little more
   tersely this way).
-  
+
   """
-  def __init__(self):
-    self.dist = tfd.Empirical(samples=[0., .1, .2, .3])
+  def __init__(self, samples=[0.,.1,.2,.3], interp='nearest'):
+    self.dist = tfd.Empirical(samples=samples)
+    self.interp = interp
     super(EmpiricalCDF, self).__init__(
         forward_min_event_ndims=0,
         validate_args=False,
         name="EmpiricalCDF")
-    
+
   def set_params(self, samples):
     # Hack to set params
     self.dist = tfd.Empirical(samples=samples)
-    
+
   def _forward(self, y):
     # Inverse CDF of empirical distribution.
-    return tfp.stats.percentile(self.dist.samples, y)
-  
+    return tfp.stats.percentile(self.dist.samples, y, interpolation=self.interp)
+
   def _inverse(self, x):
-    # CDF of empirical distribution. 
+    # CDF of empirical distribution.
     return self.dist.cdf(x)
-  
+
   def _inverse_log_det_jacobian(self, x):
     # Log PMF of the empirical distribution.
     return self.dist.log_prob(x)
+
+class EmpGaussianMixtureCDF(EmpiricalCDF):
+  """Bijector that encodes approx Gaussian mixture CDF and inverse CDF functions.
+
+  We follow the convention that the `inverse` represents the CDF
+  and `forward` the inverse CDF (the reason for this convention is
+  that inverse CDF methods for sampling are expressed a little more
+  tersely this way).
+
+  """
+  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=1000):
+    print(ps)
+    print(locs)
+    print(scales)
+    mixture_dist = tfd.Mixture(
+      cat = tfd.Categorical(probs=ps),
+      components=[tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)])
+    samples = mixture_dist.sample(sample_shape=n_samples)
+    super(EmpGaussianMixtureCDF, self).__init__(
+        samples=samples,
+        interp='linear')
+
+  # def _forward(self, y):
+  #   # Inverse CDF of Gaussian mixture distribution.
+  #   return self.mixture_dist.quantile(y)
+
+  # def _inverse(self, x):
+  #   # CDF of Gaussian mixture distribution.
+  #   return self.mixture_dist.cdf(x)
+
+  # def _inverse_log_det_jacobian(self, x):
+  #   # Log PDF of the Gaussian mixture distribution.
+  #   return self.mixture_dist.log_prob(x)

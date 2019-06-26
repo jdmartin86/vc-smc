@@ -395,7 +395,7 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 2
+    num_steps = 1
     # Number of particles to use during training
     num_train_particles = 1000
     # Number of particles to use during SMC query
@@ -421,7 +421,7 @@ if __name__ == '__main__':
     lm1_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
     lm2_prior_mean = 2.0*tf.ones([1,1],dtype=tf.float32)
     lm2_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
-    lm3_prior_mean = 5.0*tf.ones([1,1],dtype=tf.float32)
+    lm3_prior_mean = 6.0*tf.ones([1,1],dtype=tf.float32)
     lm3_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
     motion_mean = 2.0*tf.ones([1,1],dtype=tf.float32)
     motion_var = 0.1*tf.ones([1,1],dtype=tf.float32)

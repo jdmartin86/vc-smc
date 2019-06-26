@@ -218,7 +218,7 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
   def _forward(self, y):
     # Inverse CDF of empirical distribution.
     y_shape=y.get_shape()
-    return tf.reshape(tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='linear'), y_shape)
+    return tf.reshape(tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest'), y_shape)
     # return tfd.Normal(loc=self.mu1, scale=self.s1).quantile(y)
 
   def _inverse(self, x):

@@ -185,7 +185,7 @@ class EmpiricalCDF(tfb.Bijector):
     print("shape log prob: ", self.dist.log_prob(x).get_shape().as_list())
     return self.dist.log_prob(x)
 
-class EmpGaussianMixtureCDF(EmpiricalCDF):
+class EmpGaussianMixtureCDF(tfb.Bijector):
   """Bijector that encodes approx Gaussian mixture CDF and inverse CDF functions.
 
   We follow the convention that the `inverse` represents the CDF
@@ -194,7 +194,7 @@ class EmpGaussianMixtureCDF(EmpiricalCDF):
   tersely this way).
 
   """
-  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=10):
+  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=10000, interp='linear'):
     print(ps)
     print(locs)
     print(scales)
@@ -202,23 +202,32 @@ class EmpGaussianMixtureCDF(EmpiricalCDF):
     print(cat_dist)
     comps = [tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)]
     print(comps)
-    mixture_dist = tfd.Mixture(
+    self.mixture_dist = tfd.Mixture(
       cat = tfd.Categorical(probs=ps),
       components=[tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)])
-    samples = mixture_dist.sample(sample_shape=n_samples)
-    print("Sample shape!", samples.get_shape().as_list())
+    self.mu1 = locs[0]
+    self.s1 = scales[0]
+    self.samples = self.mixture_dist.sample(sample_shape=n_samples)
+    self.interp = interp
+    print("Sample shape!", self.samples.get_shape().as_list())
     super(EmpGaussianMixtureCDF, self).__init__(
-        samples=samples,
-        interp='linear')
+        forward_min_event_ndims=0,
+        validate_args=False,
+        name="EmpGaussianMixtureCDF")
 
-  # def _forward(self, y):
-  #   # Inverse CDF of Gaussian mixture distribution.
-  #   return self.mixture_dist.quantile(y)
+  def _forward(self, y):
+    # Inverse CDF of empirical distribution.
+    y_shape=y.get_shape()
+    return tf.reshape(tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='linear'), y_shape)
+    # return tfd.Normal(loc=self.mu1, scale=self.s1).quantile(y)
 
-  # def _inverse(self, x):
-  #   # CDF of Gaussian mixture distribution.
-  #   return self.mixture_dist.cdf(x)
+  def _inverse(self, x):
+    # CDF of Gaussian mixture distribution.
+    return self.mixture_dist.cdf(x)
 
-  # def _inverse_log_det_jacobian(self, x):
-  #   # Log PDF of the Gaussian mixture distribution.
-  #   return self.mixture_dist.log_prob(x)
+  def _inverse_log_det_jacobian(self, x):
+    # Log PDF of the Gaussian mixture distribution.
+    print("inv log det jac gaussian mix x shape: ", x.get_shape().as_list())
+    print("mixture log prob shape: ", tf.transpose(self.mixture_dist.log_prob(tf.transpose(x))).get_shape().as_list())
+    # return tfd.Normal(tf.transpose(self.mu1), self.s1).log_prob(x)
+    return self.mixture_dist.log_prob(x)

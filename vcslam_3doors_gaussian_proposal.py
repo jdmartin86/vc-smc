@@ -219,9 +219,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             mu2 = mu2t
             mu3 = mu3t
         if t > 0:
-            mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
-            mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
-            mu3 = mu3t + tf.transpose(self.transition_model(tf.transpose(x_prev)))
+            transition = tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
+            mu1 = mu1t + transition
+            mu2 = mu2t + transition
+            mu3 = mu3t + transition
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
@@ -233,7 +234,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs and GaussianMixtureCDF
         # x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
-        x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
+        x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var[0,0]))
         l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
         l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
         l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
@@ -299,7 +300,7 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 1
+    num_steps = 2
     # Number of particles to use during training
     num_train_particles = 100
     # Number of particles to use during SMC query
@@ -307,7 +308,7 @@ if __name__ == '__main__':
     # Number of iterations to fit the proposal parameters
     num_train_steps = 2000
     # Learning rate for the marginal
-    lr_m = 0.01
+    lr_m = 0.1
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials

@@ -348,6 +348,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                 l2_cdf,
                 l3_cdf])
 
+        print("log proposal x_curr shape: ", x_curr.get_shape().as_list())
         return gc.log_prob(x_curr)
 
     def log_normal(self, x, mu, Sigma):
@@ -371,7 +372,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         print("x sample shape: ", x_samples.get_shape().as_list())
         if t > 0:
             logG = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
-        if t == 0 or t == 1:
+        if t == 0: #or t == 1:
             logG = tf.log((1./3.)*tf.exp(self.log_normal(x_samples, l1_samples, meas_var)) + \
                           (1./3.)*tf.exp(self.log_normal(x_samples, l2_samples, meas_var)) + \
                           (1./3.)*tf.exp(self.log_normal(x_samples, l3_samples, meas_var)))
@@ -395,11 +396,11 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 1
+    num_steps = 2
     # Number of particles to use during training
-    num_train_particles = 1000
+    num_train_particles = 100
     # Number of particles to use during SMC query
-    num_query_particles = 1000000
+    num_query_particles = 100
     # Number of iterations to fit the proposal parameters
     num_train_steps = 2000
     # Learning rate for the marginal
@@ -436,7 +437,12 @@ if __name__ == '__main__':
                      meas_var]
 
     # Create the session
-    sess = tf.Session()
+
+    config = tf.ConfigProto()
+
+    config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+
+    sess = tf.Session(config=config)
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
@@ -448,7 +454,11 @@ if __name__ == '__main__':
     zt_vals = None
 
     for seed in range(num_seeds):
-        sess = tf.Session()
+        config = tf.ConfigProto()
+
+        config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+
+        sess = tf.Session(config=config)
         tf.set_random_seed(seed)
 
         # Summary writer

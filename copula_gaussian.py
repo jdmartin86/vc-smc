@@ -194,7 +194,7 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
   tersely this way).
 
   """
-  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=10000, interp='linear'):
+  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=1000, interp='linear'):
     print(ps)
     print(locs)
     print(scales)
@@ -207,6 +207,7 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
       components=[tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)])
     self.mu1 = locs[0]
     self.s1 = scales[0]
+    print("Number of samples requested: ", n_samples)
     self.samples = self.mixture_dist.sample(sample_shape=n_samples)
     self.interp = interp
     print("Sample shape!", self.samples.get_shape().as_list())
@@ -215,20 +216,56 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
         validate_args=False,
         name="EmpGaussianMixtureCDF")
 
+  def _percentile_func(self, vec):
+    return tfp.stats.percentile(vec[:-1], 100.0*vec[-1])
+
   def _forward(self, y):
-    # Inverse CDF of empirical distribution.
+    """
+    Inverse CDF of empirical distribution.
+    This is unnecessarily O(len(y)^2)
+    Could easily be O(len(y))
+    Simple gist of needed implementation (maybe better syntax):
+    for j in range(len(y)):
+        output[j] = tfp.stats.percentile(self.samples[:,j], 100.*y[j])
+    """
     y_shape=y.get_shape()
     print("Y shape! ", y_shape)
-    return tf.reshape(tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0), y_shape)
+    # percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0)
+    if len(self.samples.get_shape().as_list()) > 1:
+      # output = []
+      # for j in range(y.get_shape().as_list()[0]):
+      #   percentile_value = tfp.stats.percentile(j_samp, y[j], interpolation='nearest', axis=0)
+      #   output.append(percentile_value)
+
+      #   # print("percentile value shape: ", percentile_value.get_shape().as_list())
+      #   # return tf.reshape(tf.diag_part(percentile_data), y_shape)
+      # return tf.reshape(tf.convert_to_tensor(output), y_shape)
+      # output = tf.map_fn(self._percentile_func, tf.transpose(tf.concat([self.samples, tf.transpose(y)],axis=0)))
+      # print("OUTPUT SHAPE :", output.get_shape().as_list())
+
+      # return tf.reshape(tf.map_fn(self._percentile_func, tf.transpose(tf.concat([self.samples, tf.transpose(y)],axis=0))),y_shape)
+      percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0)
+      return tf.reshape(tf.diag_part(percentile_data), y_shape)
+    else:
+      percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0)
+      return tf.reshape(percentile_data, y_shape)
     # return tfd.Normal(loc=self.mu1, scale=self.s1).quantile(y)
 
   def _inverse(self, x):
     # CDF of Gaussian mixture distribution.
-    return self.mixture_dist.cdf(x)
+    if len(self.mixture_dist.batch_shape) < 1:
+      return self.mixture_dist.cdf(x)
+    else:
+      print("mixture dist batch shape: ", self.mixture_dist.batch_shape)
+      return tf.transpose(self.mixture_dist.cdf(tf.transpose(x)))
 
   def _inverse_log_det_jacobian(self, x):
     # Log PDF of the Gaussian mixture distribution.
     print("inv log det jac gaussian mix x shape: ", x.get_shape().as_list())
-    print("mixture log prob shape: ", tf.transpose(self.mixture_dist.log_prob(tf.transpose(x))).get_shape().as_list())
+    # print("mixture log prob shape: ", tf.transpose(self.mixture_dist.log_prob(tf.transpose(x))).get_shape().as_list())
     # return tfd.Normal(tf.transpose(self.mu1), self.s1).log_prob(x)
-    return self.mixture_dist.log_prob(x)
+    if len(self.mixture_dist.batch_shape) < 1:
+      return self.mixture_dist.log_prob(x)
+    else:
+      print("mixture dist batch shape: ", self.mixture_dist.batch_shape)
+      return tf.transpose(self.mixture_dist.log_prob(tf.transpose(x)))

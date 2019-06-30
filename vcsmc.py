@@ -224,7 +224,7 @@ class VCSLAM():
 
     def train(self,vcs_agent):
         """
-        Creates the top-level computation graph for training
+        Creates the training operation
         """
         print("Starting training")
         dependency_initializer = tf.constant_initializer(vcs_agent.init_dependency_params())
@@ -286,6 +286,4 @@ class VCSLAM():
                     message = "{:15}|{!s:20}".format(i, -loss_curr)
                     print(message)
 
-        print("Final marginal params:\n", marginal_params.eval(session=self.sess))
-
-        return proposal_params, self.sess
+        return proposal_params

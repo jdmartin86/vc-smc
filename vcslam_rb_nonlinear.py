@@ -152,6 +152,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         return xfilt, Pfilt
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
+      """Draw from the proposal p( x | x_prev, observ; proposal_params)"""
         init_pose, init_cov, A, Q, C, R = self.target_params
         num_particles = x_prev.get_shape().as_list()[0]
         prop_copula_params = proposal_params[0]
@@ -350,12 +351,6 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         return target_log - prop_log
 
 if __name__ == '__main__':
-    # List available devices
-    #local_device_protos = device_lib.list_local_devices()
-    #print([x.name for x in local_device_protos])
-    # Optionally use accelerated computation
-    # with tf.device("/device:XLA_CPU:0"):
-
     # Number of steps for the trajectory
     num_steps = 10
     # Number of particles to use during training
@@ -368,7 +363,6 @@ if __name__ == '__main__':
     num_dependency_train_steps = 1
     # Number of iterations to fit the marginal parameters
     num_marginal_train_steps = 1
-    
     # Learning rate for the marginal
     lr_m = 0.01
     # Learning rate for the copula
@@ -381,7 +375,6 @@ if __name__ == '__main__':
     prop_scale = 0.5
     # Copula initial scale
     cop_scale = 0.1
-
 
     # True target parameters
     # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
@@ -414,13 +407,13 @@ if __name__ == '__main__':
     post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
 
+    # Summary writer
+    writer = tf.summary.FileWriter('./logs', sess.graph)
+
     for seed in range(num_seeds):
       sess = tf.Session()
       tf.set_random_seed(seed)
-      
-      # Summary writer
-      writer = tf.summary.FileWriter('./logs', sess.graph)
-      
+
       # Create the VCSLAM instance with above parameters
       vcs = VCSLAM(sess = sess,
                    vcs_agent = td_agent,
@@ -432,11 +425,11 @@ if __name__ == '__main__':
                    lr_d = lr_d,
                    lr_m = lr_m,
                    summary_writer = writer)
-      
+
       # Train the model
-      opt_proposal_params, train_sess = vcs.train(vcs_agent = td_agent)
-      opt_proposal_params = train_sess.run(opt_proposal_params)
+      opt_proposal_params = vcs.train(vcs_agent = td_agent)
+      opt_proposal_params = sess.run(opt_proposal_params)
       opt_dep_params, opt_marg_params = opt_proposal_params
-    
+
     # Sample the model
     my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)

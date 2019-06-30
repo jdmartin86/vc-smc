@@ -334,12 +334,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             This is because log_proposal_copula computes the whole thing
         """
         prop_copula_params, prop_marg_params = proposal_params
-        #prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
-        #prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
         cl = self.log_proposal_copula(t, x_curr, x_prev, observ, proposal_params)
-        # cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
-        #cl = tf.debugging.check_numerics(cl, "copula log error")
-        # cm = tf.debugging.check_numerics(cm, "marg log error")
         return cl
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
@@ -369,21 +364,17 @@ if __name__ == '__main__':
     # Number of random seeds for experimental trials
     num_seeds = 1
     # Number of samples to use for plotting
-    num_samps = 1000
+    num_samples = 1000
     # Proposal initial scale
     prop_scale = 0.5
     # Copula initial scale
     cop_scale = 0.1
 
     # True target parameters
-    # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
     init_pose = tf.ones([3,1],dtype=np.float32)
     init_cov = 0.01*tf.eye(3,3,dtype=np.float32)
     A = 1.1*tf.eye(3,3,dtype=np.float32)
     Q = 0.01*tf.eye(3,3,dtype=np.float32)
-    # This was an attempt to make a correlated covariance matrix, it kind of works
-    # L = tf.constant([[0.5, 0.0, 0.0], [0.1, 0.1234, 0.0], [1.0, 0.8591, 2.0]], dtype=tf.float32)
-    # Q = 0.5*(L + tf.transpose(L))
     C = tf.eye(2,3,dtype=np.float32)
     R = 0.01*tf.eye(2,2,dtype=np.float32)
     target_params = [init_pose,init_cov,A,Q,C,R]
@@ -409,8 +400,10 @@ if __name__ == '__main__':
     post_mean, post_cov = td_agent.lgss_posterior_params(trajectory_observations,
                                                          1)
     p_mu, p_cov = sess.run([post_mean, post_cov])
-    post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
-    post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
+    post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(),
+                                                  cov=p_cov,
+                                                  size=num_samples)
+    post_values = np.array(post_values).reshape((num_samples, td_agent.state_dim))
 
     # Summary writer
     writer = tf.summary.FileWriter('./logs', sess.graph)
@@ -421,15 +414,15 @@ if __name__ == '__main__':
 
       # Create the VCSLAM instance with above parameters
       vcs = VCSLAM(sess = sess,
-                   vcs_agent = td_agent,
-                   observ = trajectory_observations,
-                   num_particles = num_particles,
-                   num_train_steps = num_train_steps,
-                   num_dependency_train_steps = num_dependency_train_steps,
-                   num_marginal_train_steps = num_marginal_train_steps,
-                   lr_d = lr_d,
-                   lr_m = lr_m,
-                   summary_writer = writer)
+                   vcs_agent=td_agent,
+                   observ=trajectory_observations,
+                   num_particles=num_particles,
+                   num_train_steps=num_train_steps,
+                   num_dependency_train_steps=num_dependency_train_steps,
+                   num_marginal_train_steps=num_marginal_train_steps,
+                   lr_d=lr_d,
+                   lr_m=lr_m,
+                   summary_writer=writer)
 
       # Train the model.
       opt_proposal_params = vcs.train(vcs_agent = td_agent)
@@ -437,10 +430,23 @@ if __name__ == '__main__':
       opt_dep_params, opt_marg_params = opt_proposal_params
 
       # Sample the VC SLAM model.
-      # Shape of trajectory_samples: num_steps x num_part
+      # Shape of trajectory_samples: num_steps x num_particles x latent_dim
       trajectory_samples = vcs.sim_q(opt_proposal_params,
                                      target_params,
                                      trajectory_observations,
                                      td_agent,
-                                     num_samples=num_samps,
+                                     num_samples=num_samples,
                                      num_particles=num_particles)
+
+      # Compute error
+      #trajectory_states_tiled = tf.tile(, [1,num_samples,1])
+      import ipdb; ipdb.set_trace()
+      trajectory_ref = tf.squeeze(tf.stack(x_true))
+
+      sq_errors = (trajectory_ref[:,None,:] - trajectory_samples)**2.0
+      loss = tf.reduce_mean(tf.reduce_sum(sq_errors, axis=2), axis=1)
+
+      loss_out = sess.run(loss)
+      np.savetxt("loss_{}.csv".format(seed), loss_out)
+      print("Done")
+      #error = utils.error(trajectory_states, trajectory_samples)

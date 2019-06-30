@@ -392,6 +392,7 @@ if __name__ == '__main__':
 
     # Generate observations TODO: change to numpy implementation
     x_true, z_true = td_agent.generate_data()
+    trajectory_ref = tf.squeeze(tf.stack(x_true))[:,None,:]
     trajectory_states, trajectory_observations = sess.run([x_true, z_true])
 
     # Get posterior samples. Since everything is linear Gaussian, just do
@@ -408,6 +409,7 @@ if __name__ == '__main__':
     # Summary writer
     writer = tf.summary.FileWriter('./logs', sess.graph)
 
+    mse_samples = []
     for seed in range(num_seeds):
       sess = tf.Session()
       tf.set_random_seed(seed)
@@ -439,12 +441,10 @@ if __name__ == '__main__':
                                      num_particles=num_particles)
 
       # Compute error
-      #trajectory_states_tiled = tf.tile(, [1,num_samples,1])
-      import ipdb; ipdb.set_trace()
-      trajectory_ref = tf.squeeze(tf.stack(x_true))
-
-      sq_errors = (trajectory_ref[:,None,:] - trajectory_samples)**2.0
+      sq_errors = (trajectory_ref - trajectory_samples)**2.0
       loss = tf.reduce_mean(tf.reduce_sum(sq_errors, axis=2), axis=1)
 
-      loss_out = sess.run(loss)
-      np.savetxt("loss_{}.csv".format(seed), loss_out)
+      mse_samples.append(sess.run(loss))
+
+    # Save data
+    np.savetxt("loss.csv", mse_samples)

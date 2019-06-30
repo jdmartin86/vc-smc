@@ -219,22 +219,8 @@ class VCSLAM():
             #w = tf.nn.softmax(logits=logw_tilde_adj)
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
-        # print("SMC time: ", (timeit.default_timer() - start_smc))
-        # Sample from the empirical approximation
-        # print("LogW tilde: ", logw_tilde)
-        # start_sample_traj = timeit.default_timer()
-        # NOTE: this loop is slow
-        # trajs = []
-        # for n in range(num_samples):
-        #     B = self.sample_traj(logw_tilde)
-        #     trajs.append(tf.gather(x_curr,B,axis=0))
         Bs = self.sample_traj(logw_tilde, num_samples)
         return tf.gather(x_curr,Bs,axis=0)
-        # print("Sample traj time: ", (timeit.default_timer() - start_sample_traj))
-        # B = self.sample_traj(logW)
-        # print("B: ", B)
-        # return trajs
-        # return x_curr, B
 
     def train(self,vcs_agent):
         """
@@ -267,8 +253,6 @@ class VCSLAM():
 
             # Start the session
             self.sess.run(tf.global_variables_initializer())
-            print("Original dep params:\n", dependency_params.eval(session=self.sess))
-            print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
 
             # Top-level training loop
             # TODO: add logging for loss terms

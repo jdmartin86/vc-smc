@@ -1,3 +1,6 @@
+"""Experiments for the range-bearing agent using a non-linear transition model.
+"""
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.client import device_lib
@@ -394,10 +397,7 @@ if __name__ == '__main__':
     x_true, z_true = td_agent.generate_data()
     trajectory_ref = tf.squeeze(tf.stack(x_true))[:,None,:]
     trajectory_states, trajectory_observations = sess.run([x_true, z_true])
-
-    # Get posterior samples. Since everything is linear Gaussian, just do
-    # Kalman filtering.
-    # TODO: change to numpy implementation
+    
     post_mean, post_cov = td_agent.lgss_posterior_params(trajectory_observations,
                                                          1)
     p_mu, p_cov = sess.run([post_mean, post_cov])
@@ -429,7 +429,6 @@ if __name__ == '__main__':
       # Train the model.
       opt_proposal_params = vcs.train(vcs_agent = td_agent)
       opt_proposal_params = sess.run(opt_proposal_params)
-      opt_dep_params, opt_marg_params = opt_proposal_params
 
       # Sample the VC SLAM model.
       # Shape of trajectory_samples: num_steps x num_particles x latent_dim
@@ -447,4 +446,4 @@ if __name__ == '__main__':
       mse_samples.append(sess.run(loss))
 
     # Save data
-    np.savetxt("loss.csv", mse_samples)
+    np.savetxt("loss.csv", mse_samples, delimiter=',')

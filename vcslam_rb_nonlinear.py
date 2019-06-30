@@ -4,7 +4,6 @@ from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 import plotting
 import tensorflow_probability as tfp
-# tfb = tfp.bijectors
 import correlation_cholesky as cc
 
 from vcsmc import *
@@ -153,49 +152,49 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
       """Draw from the proposal p( x | x_prev, observ; proposal_params)"""
-        init_pose, init_cov, A, Q, C, R = self.target_params
-        num_particles = x_prev.get_shape().as_list()[0]
-        prop_copula_params = proposal_params[0]
-        prop_marg_params = proposal_params[1]
-
-        mut = prop_marg_params[t,0:3]
-        lint = prop_marg_params[t,3:6]
-
-        # Use "bootstrap" method for s2t of univariates
-        s2t = tf.diag_part(Q)
-        if t > 0:
-            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
-        else:
-            mu = mut + lint*tf.transpose(init_pose)
-
-        # Copula params are defined over the reals, but we want a correlation matrix
-        # So we use a sigmoid map to take reals to the range [-1,1]
-        # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
-        r_vec = prop_copula_params[t,:]
-        L_mat = cc.CorrelationCholesky().forward(r_vec)
-
-        # Marginal bijectors will be the CDFs of the univariate marginals Here
-        # these are normal CDFs
-        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
-        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
-        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
-
-        # Build a copula (can also store globally if we want) we would just
-        #  have to modify self.copula.scale_tril and
-        #  self.copula.marginal_bijectors in each iteration NOTE: I add
-        #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        gc = cg.WarpedGaussianCopula(
-            loc=[0., 0., 0.],
-            scale_tril=L_mat, 
-            marginal_bijectors=[
-                x1_cdf,
-                x2_cdf,
-                x3_cdf])
-        # self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
-        # self.copula_s.distribution.scale_tril = L_mat
-
-        # sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
-        return gc.sample(x_prev.get_shape().as_list()[0])
+      init_pose, init_cov, A, Q, C, R = self.target_params
+      num_particles = x_prev.get_shape().as_list()[0]
+      prop_copula_params = proposal_params[0]
+      prop_marg_params = proposal_params[1]
+      
+      mut = prop_marg_params[t,0:3]
+      lint = prop_marg_params[t,3:6]
+      
+      # Use "bootstrap" method for s2t of univariates
+      s2t = tf.diag_part(Q)
+      if t > 0:
+        mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
+      else:
+        mu = mut + lint*tf.transpose(init_pose)
+        
+      # Copula params are defined over the reals, but we want a correlation matrix
+      # So we use a sigmoid map to take reals to the range [-1,1]
+      # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
+      r_vec = prop_copula_params[t,:]
+      L_mat = cc.CorrelationCholesky().forward(r_vec)
+      
+      # Marginal bijectors will be the CDFs of the univariate marginals Here
+      # these are normal CDFs
+      x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
+      x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
+      x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
+      
+      # Build a copula (can also store globally if we want) we would just
+      #  have to modify self.copula.scale_tril and
+      #  self.copula.marginal_bijectors in each iteration NOTE: I add
+      #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
+      gc = cg.WarpedGaussianCopula(
+          loc=[0., 0., 0.],
+          scale_tril=L_mat, 
+          marginal_bijectors=[
+              x1_cdf,
+              x2_cdf,
+              x3_cdf])
+      # self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
+      # self.copula_s.distribution.scale_tril = L_mat
+      
+      # sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
+      return gc.sample(x_prev.get_shape().as_list()[0])
 
     def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):
         """
@@ -354,11 +353,11 @@ if __name__ == '__main__':
     # Number of steps for the trajectory
     num_steps = 10
     # Number of particles to use during training
-    num_train_particles = 100
+    num_particles = 100
     # Number of particles to use during SMC query
-    num_query_particles = 1000000
+    num_query_particles = 1000
     # Number of EM iterations
-    num_train_steps = 1000
+    num_train_steps = 100
     # Number of iterations to fit the dependency parameters
     num_dependency_train_steps = 1
     # Number of iterations to fit the marginal parameters
@@ -370,7 +369,7 @@ if __name__ == '__main__':
     # Number of random seeds for experimental trials
     num_seeds = 1
     # Number of samples to use for plotting
-    num_samps = 10000
+    num_samps = 1000
     # Proposal initial scale
     prop_scale = 0.5
     # Copula initial scale
@@ -394,15 +393,21 @@ if __name__ == '__main__':
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
-    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
+    td_agent = RangeBearingAgent(target_params=target_params,
+                                 rs=rs,
+                                 num_steps=num_steps,
+                                 prop_scale=prop_scale,
+                                 cop_scale=cop_scale)
 
     # Generate observations TODO: change to numpy implementation
     x_true, z_true = td_agent.generate_data()
-    xt_vals, zt_vals = sess.run([x_true, z_true])
+    trajectory_states, trajectory_observations = sess.run([x_true, z_true])
 
-    # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
+    # Get posterior samples. Since everything is linear Gaussian, just do
+    # Kalman filtering.
     # TODO: change to numpy implementation
-    post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
+    post_mean, post_cov = td_agent.lgss_posterior_params(trajectory_observations,
+                                                         1)
     p_mu, p_cov = sess.run([post_mean, post_cov])
     post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
@@ -417,8 +422,8 @@ if __name__ == '__main__':
       # Create the VCSLAM instance with above parameters
       vcs = VCSLAM(sess = sess,
                    vcs_agent = td_agent,
-                   observ = zt_vals,
-                   num_particles = num_train_particles,
+                   observ = trajectory_observations,
+                   num_particles = num_particles,
                    num_train_steps = num_train_steps,
                    num_dependency_train_steps = num_dependency_train_steps,
                    num_marginal_train_steps = num_marginal_train_steps,
@@ -426,10 +431,16 @@ if __name__ == '__main__':
                    lr_m = lr_m,
                    summary_writer = writer)
 
-      # Train the model
+      # Train the model.
       opt_proposal_params = vcs.train(vcs_agent = td_agent)
       opt_proposal_params = sess.run(opt_proposal_params)
       opt_dep_params, opt_marg_params = opt_proposal_params
 
-    # Sample the model
-    my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
+      # Sample the VC SLAM model.
+      # Shape of trajectory_samples: num_steps x num_part
+      trajectory_samples = vcs.sim_q(opt_proposal_params,
+                                     target_params,
+                                     trajectory_observations,
+                                     td_agent,
+                                     num_samples=num_samps,
+                                     num_particles=num_particles)

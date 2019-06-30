@@ -352,7 +352,7 @@ if __name__ == '__main__':
     # Number of particles to use during SMC query
     num_query_particles = 1000
     # Number of EM iterations
-    num_train_steps = 100
+    num_train_steps = 1000
     # Number of iterations to fit the dependency parameters
     num_dependency_train_steps = 1
     # Number of iterations to fit the marginal parameters
@@ -362,7 +362,7 @@ if __name__ == '__main__':
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 1
+    num_seeds = 10
     # Number of samples to use for plotting
     num_samples = 1000
     # Proposal initial scale
@@ -448,5 +448,3 @@ if __name__ == '__main__':
 
       loss_out = sess.run(loss)
       np.savetxt("loss_{}.csv".format(seed), loss_out)
-      print("Done")
-      #error = utils.error(trajectory_states, trajectory_samples)

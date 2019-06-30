@@ -67,7 +67,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
     def transition_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
 
-        y0 = x[0] + 0.1*tf.cos(x[2])  
+        y0 = x[0] + 0.1*tf.cos(x[2])
         y1 = x[1] + 0.1*tf.sin(x[2])
         y2 = x[2]
         return tf.concat([y0[None,:],y1[None,:],y2[None,:]],0)
@@ -415,46 +415,28 @@ if __name__ == '__main__':
     post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
 
     for seed in range(num_seeds):
-        sess = tf.Session()
-        tf.set_random_seed(seed)
-
-        # Summary writer
-        writer = tf.summary.FileWriter('./logs', sess.graph)
-
-        # Create the VCSLAM instance with above parameters
-        vcs = VCSLAM(sess = sess,
-                     vcs_agent = td_agent,
-                     observ = zt_vals,
-                     num_particles = num_train_particles,
-                     num_train_steps = num_train_steps,
-                     num_dependency_train_steps = num_dependency_train_steps,
-                     num_marginal_train_steps = num_marginal_train_steps,
-                     lr_d = lr_d,
-                     lr_m = lr_m,
-                     summary_writer = writer)
-
-        # Train the model
-        opt_proposal_params, train_sess = vcs.train(vcs_agent = td_agent)
-        opt_proposal_params = train_sess.run(opt_proposal_params)
-        opt_dep_params, opt_marg_params = opt_proposal_params
-        print(opt_proposal_params)
-        print("Optimal dep params: ", opt_dep_params)
-
-        # Sample the model
-        my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
-
-        # temporary
-        # my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=1, num_particles=num_query_particles)
-        # my_samples = [train_sess.run(my_vars) for i in range(num_samps)]
-        my_samples = train_sess.run(my_vars)
-        samples_np = np.squeeze(np.array(my_samples))
-        print(samples_np.shape)
-        plotting.plot_dist(samples_np,post_values)
-
-        # plots TODO: clean up more and add other relevant plots
-        xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-        zt_vals = np.array(zt_vals)
-        plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
-        plotting.plot_dist(samples_np,post_values)
-        # plt.show()
-
+      sess = tf.Session()
+      tf.set_random_seed(seed)
+      
+      # Summary writer
+      writer = tf.summary.FileWriter('./logs', sess.graph)
+      
+      # Create the VCSLAM instance with above parameters
+      vcs = VCSLAM(sess = sess,
+                   vcs_agent = td_agent,
+                   observ = zt_vals,
+                   num_particles = num_train_particles,
+                   num_train_steps = num_train_steps,
+                   num_dependency_train_steps = num_dependency_train_steps,
+                   num_marginal_train_steps = num_marginal_train_steps,
+                   lr_d = lr_d,
+                   lr_m = lr_m,
+                   summary_writer = writer)
+      
+      # Train the model
+      opt_proposal_params, train_sess = vcs.train(vcs_agent = td_agent)
+      opt_proposal_params = train_sess.run(opt_proposal_params)
+      opt_dep_params, opt_marg_params = opt_proposal_params
+    
+    # Sample the model
+    my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)

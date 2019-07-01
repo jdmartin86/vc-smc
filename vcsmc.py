@@ -89,8 +89,9 @@ class VCSLAM():
         Returns:
             index: An ancenstral index
         """
-        resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
-        return resampling_dist.sample(sample_shape=(num_samples))
+        resampling_dist = tf.contrib.distributions.Categorical(
+            logits=log_weights)
+        return tf.to_int64(resampling_dist.sample(sample_shape=num_samples))
 
     def vsmc_lower_bound(self, vcs_agent, proposal_params):
         """
@@ -153,26 +154,45 @@ class VCSLAM():
         # print("Train SMC Time: ", (timeit.default_timer() - start_smc))
         return logZ
 
+    def get_traj_samples(self, trajectories, logits, num_samples):
+      step_indices = tf.range(tf.to_int64(self.num_steps))[:, None]
+      traj_indices = self.sample_traj(logits, num_samples)
+
+      step_indices_tiled = tf.tile(step_indices, [1, num_samples])
+      traj_indices_tiled = tf.tile(traj_indices[None,:], [self.num_steps, 1])
+      step_indices_tiled = tf.expand_dims(step_indices_tiled, 2)
+      traj_indices_tiled = tf.expand_dims(traj_indices_tiled, 2)
+
+      indices = tf.concat([step_indices_tiled, traj_indices_tiled], 2)
+
+      return tf.gather_nd(trajectories, indices)
+
+    def get_map_traj(self, trajectories, logits):
+      # Compute the index of highest probability trajectory.
+      dist = tf.contrib.distributions.Categorical(logits=logits)
+      traj_index = tf.expand_dims(tf.argmax(dist.probs), 0)
+
+      step_indices = tf.range(tf.to_int64(self.num_steps))[:, None]
+      traj_index_tiled = tf.tile(traj_index, [self.num_steps])[:, None]
+      indices = tf.concat([step_indices, traj_index_tiled], 1)
+
+      return tf.gather_nd(trajectories, indices)
+
+
     def sim_q(self,
               prop_params,
               model_params,
               y,
               vcs_obj,
-              num_samples = 1,
-              num_particles=None):
+              num_samples = 1):
       """
       Simulates a single sample from the VSMC approximation.
       This returns the SLAM solution
       This procedure is the same as the objective, but it saves the trajectory
       """
-
-      # Allow user to simulate q with more particles than we trained with
-      if num_particles is None:
-        num_particles = self.num_particles
-
       # Initialize SMC
-      x_curr = tf.zeros([num_particles, self.latent_dim])
-      x_prev = tf.zeros([num_particles, self.latent_dim])
+      x_curr = tf.zeros([self.num_particles, self.latent_dim])
+      x_prev = tf.zeros([self.num_particles, self.latent_dim])
 
       # Unnormalized particle weights
       logw_tilde = tf.zeros(self.num_particles)
@@ -189,7 +209,7 @@ class VCSLAM():
         # Resampling
         # Shape of x_prev (num_particles,latent_dim)
         if t > 0:
-          ancestors = self.resampling(logw_tilde, num_particles)
+          ancestors = self.resampling(logw_tilde, self.num_particles)
           x_prev = tf.gather(x_curr,ancestors,axis=0)
         else:
           x_prev = x_curr
@@ -215,19 +235,10 @@ class VCSLAM():
       # Stack trajectories into a tensor.
       trajectories = tf.stack(trajectories)
 
-      # Sample the final index
-      step_indices = tf.range(tf.to_int32(self.num_steps))[:, None]
-      traj_indices = self.sample_traj(logw_tilde, num_samples)
-
-      step_indices_tiled = tf.tile(step_indices, [1, num_samples])
-      traj_indices_tiled = tf.tile(traj_indices[None,:], [self.num_steps, 1])
-      step_indices_tiled = tf.expand_dims(step_indices_tiled, 2)
-      traj_indices_tiled = tf.expand_dims(traj_indices_tiled, 2)
-
-      indices = tf.concat([step_indices_tiled, traj_indices_tiled], 2)
-
-      chosen_trajs = tf.gather_nd(trajectories, indices)
-      return chosen_trajs
+      # Return a batch of sampled trajectories and the MAP trajectory.
+      chosen_trajs = self.get_traj_samples(trajectories, logw_tilde, num_samples)
+      map_traj = self.get_map_traj(trajectories, logw_tilde)
+      return chosen_trajs, map_traj
 
     def train(self,vcs_agent):
         """

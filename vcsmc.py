@@ -244,11 +244,11 @@ class VCSLAM():
         """
         Creates the training operation
         """
-        print("Starting training")
         dependency_initializer = tf.constant_initializer(vcs_agent.init_dependency_params())
         marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
 
         # Initialize the parameters
+        # Can we just use place holders for the params?
         with tf.variable_scope("vcsmc", reuse=tf.AUTO_REUSE):
             dependency_params = tf.get_variable( "theta",
                                                  dtype=tf.float32,

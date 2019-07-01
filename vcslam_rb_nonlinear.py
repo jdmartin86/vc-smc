@@ -14,8 +14,6 @@ import vcslam_agent
 
 import copula_gaussian as cg
 
-# Remove warnings
-tf.logging.set_verbosity(tf.logging.ERROR)
 tf.reset_default_graph()
 
 class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
@@ -302,10 +300,8 @@ if __name__ == '__main__':
   num_steps = 10
   # Number of particles to use during training
   num_particles = 100
-  # Number of particles to use during SMC query
-  num_query_particles = 1000
   # Number of EM iterations
-  num_train_steps = 1000
+  num_train_steps = 1
   # Number of iterations to fit the dependency parameters
   num_dependency_train_steps = 1
   # Number of iterations to fit the marginal parameters
@@ -315,7 +311,7 @@ if __name__ == '__main__':
   # Learning rate for the copula
   lr_d = 0.001
   # Number of random seeds for experimental trials
-  num_seeds = 10
+  num_seeds = 1
   # Number of samples to use for plotting
   num_samples = 1000
   # Proposal initial scale
@@ -343,15 +339,22 @@ if __name__ == '__main__':
                                prop_scale=prop_scale,
                                cop_scale=cop_scale)
 
-  # Generate observations TODO: change to numpy implementation
-  x_true, z_true = td_agent.generate_data()
-  trajectory_ref = tf.squeeze(tf.stack(x_true))
-  _, trajectory_observations = sess.run([x_true, z_true])
+  # Generate observations
+  trajectory_ref, trajectory_observations = td_agent.generate_data()
+  trajectory_ref = tf.squeeze(tf.stack(trajectory_ref))
+
+  # The initial paramters are used for SMC
+  initial_dependency_params = td_agent.init_dependency_params()
+  initial_marginal_params = td_agent.init_marg_params()
+  initial_dependency_params = tf.convert_to_tensor(initial_dependency_params, tf.float32)
+  initial_marginal_params = tf.convert_to_tensor(initial_marginal_params, tf.float32)
+  initial_proposal_params = [initial_dependency_params, initial_marginal_params]
 
   # Summary writer
   writer = tf.summary.FileWriter('./logs', sess.graph)
 
   mean_loss_samples = []; map_loss_samples = []
+  mean_smc_loss_samples = []; map_smc_loss_samples = []
   for seed in range(num_seeds):
     sess = tf.Session() # TODO: is this needed?
     tf.set_random_seed(seed)
@@ -370,7 +373,6 @@ if __name__ == '__main__':
 
     # Train the model.
     opt_proposal_params = vcs.train(vcs_agent = td_agent)
-    opt_proposal_params = sess.run(opt_proposal_params)
 
     # Sample the VC SLAM model.
     # Shape of trajectory_samples: num_steps x num_particles x latent_dim
@@ -380,6 +382,14 @@ if __name__ == '__main__':
                                                    td_agent,
                                                    num_samples=num_samples)
 
+    # Sample the initial model for an SMC baseline
+    trajectory_samples_smc, trajectory_map_smc = \
+        vcs.sim_q(initial_proposal_params,
+                  target_params,
+                  trajectory_observations,
+                  td_agent,
+                  num_samples=num_samples)
+    
     # Compute error using the mean of the trajectory samples
     trajectory_mean = tf.reduce_mean(trajectory_samples, axis=1)
     sq_errors = (trajectory_ref - trajectory_mean)**2.0
@@ -389,15 +399,35 @@ if __name__ == '__main__':
     sq_error = (trajectory_ref - trajectory_map)**2.0
     loss_map = tf.reduce_sum(sq_error, axis=1)
 
-    mean_loss_samples.append(sess.run(loss_mean))
-    map_loss_samples.append(sess.run(loss_map))
+    loss_mean_out, loss_map_out = sess.run([loss_mean, loss_map])
+    mean_loss_samples.append(loss_mean_out)
+    map_loss_samples.append(loss_map_out)
+
+    # Compute error using the mean of the SMC trajectory samples
+    trajectory_mean = tf.reduce_mean(trajectory_samples_smc, axis=1)
+    sq_errors = (trajectory_ref - trajectory_mean)**2.0
+    loss_mean_smc = tf.reduce_sum(sq_errors, axis=1)
+
+    # Compute error using the SMC MAP trajectory
+    sq_error = (trajectory_ref - trajectory_map_smc)**2.0
+    loss_map = tf.reduce_sum(sq_error, axis=1)
+    
+    loss_mean_out, loss_map_out = sess.run([loss_mean, loss_map])
+    mean_smc_loss_samples.append(loss_mean_out)
+    map_smc_loss_samples.append(loss_map_out)
 
   # Save data
   mean_loss_samples = np.squeeze(mean_loss_samples)
   map_loss_samples = np.squeeze(map_loss_samples)
+  mean_smc_loss_samples = np.squeeze(mean_smc_loss_samples)
+  map_smc_loss_samples = np.squeeze(map_smc_loss_samples)
 
   mean_loss_samples = np.reshape(mean_loss_samples, num_seeds*num_steps)
   map_loss_samples = np.reshape(map_loss_samples, num_seeds*num_steps)
+  mean_smc_loss_samples = np.reshape(mean_smc_loss_samples, num_seeds*num_steps)
+  map_smc_loss_samples = np.reshape(map_smc_loss_samples, num_seeds*num_steps)
 
-  np.savetxt("loss_mean.csv", mean_loss_samples, delimiter=',')
-  np.savetxt("loss_map.csv", map_loss_samples, delimiter=',')
+  np.savetxt("loss_vcsmc_mean.csv", mean_loss_samples, delimiter=',')
+  np.savetxt("loss_vcsmc_map.csv", map_loss_samples, delimiter=',')
+  np.savetxt("loss_smc_mean.csv", mean_smc_loss_samples, delimiter=',')
+  np.savetxt("loss_smc_map.csv", map_smc_loss_samples, delimiter=',')

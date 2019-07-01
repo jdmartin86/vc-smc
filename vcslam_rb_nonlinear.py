@@ -353,7 +353,7 @@ if __name__ == '__main__':
     # Number of particles to use during SMC query
     num_query_particles = 1000
     # Number of EM iterations
-    num_train_steps = 10
+    num_train_steps = 1
     # Number of iterations to fit the dependency parameters
     num_dependency_train_steps = 1
     # Number of iterations to fit the marginal parameters
@@ -363,7 +363,7 @@ if __name__ == '__main__':
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 1
+    num_seeds = 2
     # Number of samples to use for plotting
     num_samples = 1000
     # Proposal initial scale
@@ -409,11 +409,11 @@ if __name__ == '__main__':
 
     mean_loss_samples = []; map_loss_samples = []
     for seed in range(num_seeds):
-      sess = tf.Session()
+      sess = tf.Session() # TODO: is this needed?
       tf.set_random_seed(seed)
 
       # Create the VCSLAM instance with above parameters
-      vcs = VCSLAM(sess = sess,
+      vcs = VCSLAM(sess=sess,
                    vcs_agent=td_agent,
                    observ=trajectory_observations,
                    num_particles=num_particles,
@@ -449,5 +449,11 @@ if __name__ == '__main__':
       map_loss_samples.append(sess.run(loss_map))
 
     # Save data
+    mean_loss_samples = np.squeeze(mean_loss_samples)
+    map_loss_samples = np.squeeze(map_loss_samples)
+
+    mean_loss_samples = np.reshape(mean_loss_samples, num_seeds*num_steps)
+    map_loss_samples = np.reshape(map_loss_samples, num_seeds*num_steps)
+
     np.savetxt("loss_mean.csv", mean_loss_samples, delimiter=',')
     np.savetxt("loss_map.csv", map_loss_samples, delimiter=',')

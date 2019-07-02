@@ -5,6 +5,7 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
+
 class NormalCDF(tfb.Bijector):
   """Bijector that encodes normal CDF and inverse CDF functions.
 
@@ -113,7 +114,7 @@ class Concat(tfb.Bijector):
   # TODO: parameterize this epsilon=10.0e-5
   def _inverse(self, y):
     split_ys = tf.split(y, len(self.bijectors), -1)
-    transformed_ys = [tf.clip_by_value(b_i.inverse(y_i), clip_value_min=10.0e-5, clip_value_max=1.0-10.0e-5) for b_i, y_i in zip(
+    transformed_ys = [tf.clip_by_value(b_i.inverse(y_i), clip_value_min=10.0e-3, clip_value_max=1.0-10.0e-3) for b_i, y_i in zip(
         self.bijectors, split_ys)]
     return tf.concat(transformed_ys, -1)
 
@@ -194,7 +195,7 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
   tersely this way).
 
   """
-  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=1000, interp='linear'):
+  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=500, interp='nearest'):
     print(ps)
     print(locs)
     print(scales)
@@ -232,22 +233,10 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
     print("Y shape! ", y_shape)
     # percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0)
     if len(self.samples.get_shape().as_list()) > 1:
-      # output = []
-      # for j in range(y.get_shape().as_list()[0]):
-      #   percentile_value = tfp.stats.percentile(j_samp, y[j], interpolation='nearest', axis=0)
-      #   output.append(percentile_value)
-
-      #   # print("percentile value shape: ", percentile_value.get_shape().as_list())
-      #   # return tf.reshape(tf.diag_part(percentile_data), y_shape)
-      # return tf.reshape(tf.convert_to_tensor(output), y_shape)
-      # output = tf.map_fn(self._percentile_func, tf.transpose(tf.concat([self.samples, tf.transpose(y)],axis=0)))
-      # print("OUTPUT SHAPE :", output.get_shape().as_list())
-
-      # return tf.reshape(tf.map_fn(self._percentile_func, tf.transpose(tf.concat([self.samples, tf.transpose(y)],axis=0))),y_shape)
-      percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0)
+      percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation=self.interp,axis=0)
       return tf.reshape(tf.diag_part(percentile_data), y_shape)
     else:
-      percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0)
+      percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation=self.interp,axis=0)
       return tf.reshape(percentile_data, y_shape)
     # return tfd.Normal(loc=self.mu1, scale=self.s1).quantile(y)
 

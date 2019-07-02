@@ -372,10 +372,14 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         print("x sample shape: ", x_samples.get_shape().as_list())
         if t > 0:
             logG = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
-        if t == 0: #or t == 1:
-            logG = tf.log((1./3.)*tf.exp(self.log_normal(x_samples, l1_samples, meas_var)) + \
-                          (1./3.)*tf.exp(self.log_normal(x_samples, l2_samples, meas_var)) + \
-                          (1./3.)*tf.exp(self.log_normal(x_samples, l3_samples, meas_var)))
+        if t == 0 or t == 1:
+            log_mixture_components = [tf.log(1./3.) + self.log_normal(x_samples, l1_samples, meas_var),
+                                      tf.log(1./3.) + self.log_normal(x_samples, l2_samples, meas_var),
+                                      tf.log(1./3.) + self.log_normal(x_samples, l3_samples, meas_var)]
+            logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
+            # logG = tf.log((1./3.)*tf.exp(self.log_normal(x_samples, l1_samples, meas_var)) + \
+            #               (1./3.)*tf.exp(self.log_normal(x_samples, l2_samples, meas_var)) + \
+            #               (1./3.)*tf.exp(self.log_normal(x_samples, l3_samples, meas_var)))
         logH = self.log_normal(l1_samples, lm1_prior_mean, lm1_prior_var) + \
                self.log_normal(l2_samples, lm2_prior_mean, lm2_prior_var) + \
                self.log_normal(l3_samples, lm3_prior_mean, lm3_prior_var)
@@ -390,29 +394,29 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
 if __name__ == '__main__':
     # List available devices
-    #local_device_protos = device_lib.list_local_devices()
-    #print([x.name for x in local_device_protos])
+    # local_device_protos = device_lib.list_local_devices()
+    # print([x.name for x in local_device_protos])
     # Optionally use accelerated computation
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 2
+    num_steps = 1
     # Number of particles to use during training
-    num_train_particles = 100
+    num_train_particles = 10000
     # Number of particles to use during SMC query
-    num_query_particles = 100
+    num_query_particles = 1000000
     # Number of iterations to fit the proposal parameters
     num_train_steps = 2000
     # Learning rate for the marginal
-    lr_m = 0.05
+    lr_m = 0.1
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
     num_seeds = 1
     # Number of samples to use for plotting
-    num_samps = 10000
+    num_samps = 200000
     # Proposal initial scale
-    prop_scale = 0.5
+    prop_scale = 1.0
     # Copula initial scale
     cop_scale = 0.1
 
@@ -475,8 +479,8 @@ if __name__ == '__main__':
                      summary_writer = writer)
 
         # Train the model
-        opt_proposal_params, train_sess = vcs.train(vcs_agent = td_agent)
-        opt_proposal_params = train_sess.run(opt_proposal_params)
+        opt_proposal_params = vcs.train(vcs_agent = td_agent)
+        opt_proposal_params = sess.run(opt_proposal_params)
         opt_dep_params, opt_marg_params = opt_proposal_params
         print(opt_proposal_params)
         print("Optimal dep params: ", opt_dep_params)
@@ -484,19 +488,14 @@ if __name__ == '__main__':
         # Sample the model
         my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
 
-        my_samples = train_sess.run(my_vars)
+        my_samples = sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
         print(samples_np.shape)
 
-        # plots TODO: clean up more and add other relevant plots
-        # xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-        # zt_vals = np.array(zt_vals)
-        # plotting.plot_kde(samples_np,None,xt_vals,zt_vals)
-        # plotting.plot_dist(samples_np,None)
-        sbs.distplot(samples_np[:,0], color='purple')
-        sbs.distplot(samples_np[:,1], color='red')
-        sbs.distplot(samples_np[:,2], color='green')
-        sbs.distplot(samples_np[:,3], color='blue')
+        sbs.distplot(samples_np[:,0], color='purple', norm_hist=True, kde_kws={'bw': 'silverman'})
+        sbs.distplot(samples_np[:,1], color='red', kde_kws={'bw': 'silverman'})
+        sbs.distplot(samples_np[:,2], color='green', kde_kws={'bw': 'silverman'})
+        sbs.distplot(samples_np[:,3], color='blue', kde_kws={'bw': 'silverman'})
 
         plt.show()
 

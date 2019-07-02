@@ -1,10 +1,12 @@
+"""Experiments for the range-bearing agent using a non-linear transition model.
+"""
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.client import device_lib
 import tensorflow.contrib.distributions as tfd
 import plotting
 import tensorflow_probability as tfp
-# tfb = tfp.bijectors
 import correlation_cholesky as cc
 
 from vcsmc import *
@@ -12,8 +14,6 @@ import vcslam_agent
 
 import copula_gaussian as cg
 
-# Remove warnings
-tf.logging.set_verbosity(tf.logging.ERROR)
 tf.reset_default_graph()
 
 class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
@@ -29,31 +29,28 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
                  prop_scale=0.5,
                  cop_scale=0.5):
         # Target model params
-        self.target_params = target_params
+        self.target_params=target_params
         # Number of time steps
-        self.num_steps = num_steps
+        self.num_steps=num_steps
         # Latent state dimensionality (x)
-        self.state_dim = state_dim
+        self.state_dim=state_dim
         # Num landmarks
-        self.num_landmarks = num_landmarks
+        self.num_landmarks=num_landmarks
         # Landmark dimensionality (x)
-        self.landmark_dim = landmark_dim
+        self.landmark_dim=landmark_dim
         # Latent variable dimensionality
-        # if not latent_dim:
-        #     self.latent_dim = self.num_steps * (self.state_dim + self.landmark_dim*self.num_landmarks)
-        # else:
-        #     self.latent_dim = latent_dim
-        self.latent_dim = (self.state_dim + self.landmark_dim*self.num_landmarks)
+        self.latent_dim=(self.state_dim + self.landmark_dim*self.num_landmarks)
         # Observation dimensionality (direct observations of x_door)
-        self.observ_dim = observ_dim
+        self.observ_dim=observ_dim
         # Proposal params
-        self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
+        self.proposal_params=tf.placeholder(tf.float32, [10, 1],
+                                            'proposal_params')
 
-        self.prop_scale = prop_scale
-        self.cop_scale = cop_scale
+        self.prop_scale=prop_scale
+        self.cop_scale=cop_scale
 
         # Random state for sampling
-        self.rs = rs
+        self.rs=rs
 
         # initialize dependency models
         self.copula_s = cg.WarpedGaussianCopula(
@@ -67,7 +64,7 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
     def transition_model(self, x):
         init_pose, init_cov, A, Q, C, R = self.target_params
 
-        y0 = x[0] + 0.1*tf.cos(x[2])  
+        y0 = x[0] + 0.1*tf.cos(x[2])
         y1 = x[1] + 0.1*tf.sin(x[2])
         y2 = x[2]
         return tf.concat([y0[None,:],y1[None,:],y2[None,:]],0)
@@ -152,80 +149,46 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
         return xfilt, Pfilt
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
-        init_pose, init_cov, A, Q, C, R = self.target_params
-        num_particles = x_prev.get_shape().as_list()[0]
-        prop_copula_params = proposal_params[0]
-        prop_marg_params = proposal_params[1]
-
-        mut = prop_marg_params[t,0:3]
-        lint = prop_marg_params[t,3:6]
-
-        # Use "bootstrap" method for s2t of univariates
-        s2t = tf.diag_part(Q)
-        if t > 0:
-            mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
-        else:
-            mu = mut + lint*tf.transpose(init_pose)
-
-        # Copula params are defined over the reals, but we want a correlation matrix
-        # So we use a sigmoid map to take reals to the range [-1,1]
-        # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
-        r_vec = prop_copula_params[t,:]
-        L_mat = cc.CorrelationCholesky().forward(r_vec)
-
-        # Marginal bijectors will be the CDFs of the univariate marginals Here
-        # these are normal CDFs
-        x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
-        x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
-        x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
-
-        # Build a copula (can also store globally if we want) we would just
-        #  have to modify self.copula.scale_tril and
-        #  self.copula.marginal_bijectors in each iteration NOTE: I add
-        #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        gc = cg.WarpedGaussianCopula(
-            loc=[0., 0., 0.],
-            scale_tril=L_mat, 
-            marginal_bijectors=[
-                x1_cdf,
-                x2_cdf,
-                x3_cdf])
-        # self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
-        # self.copula_s.distribution.scale_tril = L_mat
-
-        # sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
-        return gc.sample(x_prev.get_shape().as_list()[0])
-
-    def log_proposal_copula_sl(self,t,x_curr,x_prev,observ,proposal_params):
-        """
-        Returns the log probability from the state-landmark copula
-        This function requires the multi-dimensional CDF of states,
-        and the mutli-dimensional CDF of all M landmarks
-        """
-        # TODO: implement log of multi-dimensional state and landmark copula density
-        # Need to split the tensor components into the state and land marks,
-        # transform with their CDFs and
-        # evaluate on the copula, and take the log
-        #s_curr_tilde = self.mv_state_cdf(s_curr,x_prev,observ)
-
-        # apply CDF for all landmarks (num_landmarks,landmark_dim)
-        #l_curr_tilde = self.mv_lndmk_cdf(l_curr,x_prev,observ)
-
-        # apply copula model
-        #C_sl = self.copula_sl(s_curr_tilde,l_curr_tilde)
-
-        # differentiate to get c?
-        num_particles = x_curr.get_shape().as_list()[0]
-        # xx_dist = NormalCDF()
-        # x_tilde =
-        return tf.zeros(shape=(num_particles),dtype=tf.float32)
-
-    def log_proposal_copula_ll(self,t,x_curr,x_prev,observ,proposal_params):
-        """
-        Log probability from the landmark-landmark copula
-        """
-        num_particles = x_curr.get_shape().as_list()[0]
-        return tf.zeros(shape=(num_particles),dtype=tf.float32)
+      """Draw from the proposal p( x | x_prev, observ; proposal_params)"""
+      init_pose, init_cov, A, Q, C, R = self.target_params
+      num_particles = x_prev.get_shape().as_list()[0]
+      prop_copula_params = proposal_params[0]
+      prop_marg_params = proposal_params[1]
+      
+      mut = prop_marg_params[t,0:3]
+      lint = prop_marg_params[t,3:6]
+      
+      # Use "bootstrap" method for s2t of univariates
+      s2t = tf.diag_part(Q)
+      if t > 0:
+        mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
+      else:
+        mu = mut + lint*tf.transpose(init_pose)
+        
+      # Copula params are defined over the reals, but we want a correlation matrix
+      # So we use a sigmoid map to take reals to the range [-1,1]
+      # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
+      r_vec = prop_copula_params[t,:]
+      L_mat = cc.CorrelationCholesky().forward(r_vec)
+      
+      # Marginal bijectors will be the CDFs of the univariate marginals Here
+      # these are normal CDFs
+      x1_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,0]]), scale=tf.sqrt(s2t[0]))
+      x2_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,1]]), scale=tf.sqrt(s2t[1]))
+      x3_cdf = cg.NormalCDF(loc=tf.transpose([mu[:,2]]), scale=tf.sqrt(s2t[2]))
+      
+      # Build a copula (can also store globally if we want) we would just
+      #  have to modify self.copula.scale_tril and
+      #  self.copula.marginal_bijectors in each iteration NOTE: I add
+      #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
+      gc = cg.WarpedGaussianCopula(
+          loc=[0., 0., 0.],
+          scale_tril=L_mat, 
+          marginal_bijectors=[
+              x1_cdf,
+              x2_cdf,
+              x3_cdf])
+      return gc.sample(x_prev.get_shape().as_list()[0])
 
     def log_proposal_copula_s(self,t,x_curr,x_prev,observ,proposal_params):
         """
@@ -276,22 +239,11 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
 
         return gc.log_prob(x_curr)
 
-
-    def log_proposal_copula_l(self,t,x_curr,x_prev,observ,proposal_params):
-        """
-        Log probability from the landmark-component copula
-        """
-        num_particles = x_curr.get_shape().as_list()[0]
-        return tf.zeros(shape=(num_particles),dtype=tf.float32)
-
     def log_proposal_copula(self,t,x_curr,x_prev,observ,proposal_params):
         """
         Returns the log probability from the copula model described in Equation 4
         """
-        return self.log_proposal_copula_sl(t,x_curr,x_prev,observ,proposal_params) + \
-            self.log_proposal_copula_ll(t,x_curr,x_prev,observ,proposal_params) + \
-            self.log_proposal_copula_s(t,x_curr,x_prev,observ,proposal_params) + \
-            self.log_proposal_copula_l(t,x_curr,x_prev,observ,proposal_params)
+        return self.log_proposal_copula_s(t,x_curr,x_prev,observ,proposal_params)
 
     def log_normal(self, x, mu, Sigma):
         dim = Sigma.get_shape().as_list()[0]
@@ -309,7 +261,8 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             logF = self.log_normal(x_curr, tf.transpose(self.transition_model(tf.transpose(x_prev))), Q)
         else:
             logF = self.log_normal(x_curr, tf.transpose(init_pose), init_cov)
-        logG = self.log_normal(tf.transpose(self.measurement_model(tf.transpose(x_curr))), tf.transpose(tf.convert_to_tensor(observ[t], dtype=tf.float32)), R)
+        logG = self.log_normal(tf.transpose(self.measurement_model(tf.transpose(x_curr))),
+                               tf.transpose(tf.convert_to_tensor(observ[t], dtype=tf.float32)), R)
         return logF + logG
 
     def log_proposal_marginal(self, t, x_curr, x_prev, observ, prop_marg_params):
@@ -334,127 +287,147 @@ class RangeBearingAgent(vcslam_agent.VCSLAMAgent):
             This is because log_proposal_copula computes the whole thing
         """
         prop_copula_params, prop_marg_params = proposal_params
-        #prop_copula_params = tf.debugging.check_numerics(prop_copula_params, "Copula param error")
-        #prop_marg_params = tf.debugging.check_numerics(prop_marg_params, "Marg param error")
         cl = self.log_proposal_copula(t, x_curr, x_prev, observ, proposal_params)
-        # cm = self.log_proposal_marginal(t, x_curr, x_prev, observ, prop_marg_params)
-        #cl = tf.debugging.check_numerics(cl, "copula log error")
-        # cm = tf.debugging.check_numerics(cm, "marg log error")
         return cl
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
-        #target_log = tf.debugging.check_numerics(target_log, "Target log error")
         prop_log = self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
-        #prop_log = tf.debugging.check_numerics(prop_log, "Proposal log error")
         return target_log - prop_log
 
 if __name__ == '__main__':
-    # List available devices
-    #local_device_protos = device_lib.list_local_devices()
-    #print([x.name for x in local_device_protos])
-    # Optionally use accelerated computation
-    # with tf.device("/device:XLA_CPU:0"):
+  # Number of steps for the trajectory
+  num_steps = 10
+  # Number of particles to use during training
+  num_particles = 100
+  # Number of EM iterations
+  num_train_steps = 1
+  # Number of iterations to fit the dependency parameters
+  num_dependency_train_steps = 1
+  # Number of iterations to fit the marginal parameters
+  num_marginal_train_steps = 1
+  # Learning rate for the marginal
+  lr_m = 0.01
+  # Learning rate for the copula
+  lr_d = 0.001
+  # Number of random seeds for experimental trials
+  num_seeds = 1
+  # Number of samples to use for plotting
+  num_samples = 1000
+  # Proposal initial scale
+  prop_scale = 0.5
+  # Copula initial scale
+  cop_scale = 0.1
 
-    # Number of steps for the trajectory
-    num_steps = 10
-    # Number of particles to use during training
-    num_train_particles = 100
-    # Number of particles to use during SMC query
-    num_query_particles = 1000000
-    # Number of EM iterations
-    num_train_steps = 1000
-    # Number of iterations to fit the dependency parameters
-    num_dependency_train_steps = 1
-    # Number of iterations to fit the marginal parameters
-    num_marginal_train_steps = 1
+  # True target parameters
+  init_pose = tf.ones([3,1],dtype=np.float32)
+  init_cov = 0.01*tf.eye(3,3,dtype=np.float32)
+  A = 1.1*tf.eye(3,3,dtype=np.float32)
+  Q = 0.01*tf.eye(3,3,dtype=np.float32)
+  C = tf.eye(2,3,dtype=np.float32)
+  R = 0.01*tf.eye(2,2,dtype=np.float32)
+  target_params = [init_pose,init_cov,A,Q,C,R]
+
+  # Create the session
+  sess = tf.Session()
+
+  # Create the agent
+  rs = np.random.RandomState(1)# This remains fixed for the ground truth
+  td_agent = RangeBearingAgent(target_params=target_params,
+                               rs=rs,
+                               num_steps=num_steps,
+                               prop_scale=prop_scale,
+                               cop_scale=cop_scale)
+
+  # Generate observations
+  trajectory_ref, trajectory_observations = td_agent.generate_data()
+  trajectory_ref = tf.squeeze(tf.stack(trajectory_ref))
+
+  # The initial paramters are used for SMC
+  initial_dependency_params = td_agent.init_dependency_params()
+  initial_marginal_params = td_agent.init_marg_params()
+  initial_dependency_params = tf.convert_to_tensor(initial_dependency_params, tf.float32)
+  initial_marginal_params = tf.convert_to_tensor(initial_marginal_params, tf.float32)
+  initial_proposal_params = [initial_dependency_params, initial_marginal_params]
+
+  # Summary writer
+  writer = tf.summary.FileWriter('./logs', sess.graph)
+
+  mean_loss_samples = []; map_loss_samples = []
+  mean_smc_loss_samples = []; map_smc_loss_samples = []
+  for seed in range(num_seeds):
+    sess = tf.Session() # TODO: is this needed?
+    tf.set_random_seed(seed)
+
+    # Create the VCSLAM instance with above parameters
+    vcs = VCSLAM(sess=sess,
+                 vcs_agent=td_agent,
+                 observ=trajectory_observations,
+                 num_particles=num_particles,
+                 num_train_steps=num_train_steps,
+                 num_dependency_train_steps=num_dependency_train_steps,
+                 num_marginal_train_steps=num_marginal_train_steps,
+                 lr_d=lr_d,
+                 lr_m=lr_m,
+                 summary_writer=writer)
+
+    # Train the model.
+    opt_proposal_params = vcs.train(vcs_agent = td_agent)
+
+    # Sample the VC SLAM model.
+    # Shape of trajectory_samples: num_steps x num_particles x latent_dim
+    trajectory_samples, trajectory_map = vcs.sim_q(opt_proposal_params,
+                                                   target_params,
+                                                   trajectory_observations,
+                                                   td_agent,
+                                                   num_samples=num_samples)
+
+    # Sample the initial model for an SMC baseline
+    trajectory_samples_smc, trajectory_map_smc = \
+        vcs.sim_q(initial_proposal_params,
+                  target_params,
+                  trajectory_observations,
+                  td_agent,
+                  num_samples=num_samples)
     
-    # Learning rate for the marginal
-    lr_m = 0.01
-    # Learning rate for the copula
-    lr_d = 0.001
-    # Number of random seeds for experimental trials
-    num_seeds = 1
-    # Number of samples to use for plotting
-    num_samps = 10000
-    # Proposal initial scale
-    prop_scale = 0.5
-    # Copula initial scale
-    cop_scale = 0.1
+    # Compute error using the mean of the trajectory samples
+    trajectory_mean = tf.reduce_mean(trajectory_samples, axis=1)
+    sq_errors = (trajectory_ref - trajectory_mean)**2.0
+    loss_mean = tf.reduce_sum(sq_errors, axis=1)
 
+    # Compute error using the MAP trajectory
+    sq_error = (trajectory_ref - trajectory_map)**2.0
+    loss_map = tf.reduce_sum(sq_error, axis=1)
 
-    # True target parameters
-    # Consider replacing this with "map", "initial_pose", "true_measurement_model", and "true_odometry_model"
-    init_pose = tf.ones([3,1],dtype=np.float32)
-    init_cov = 0.01*tf.eye(3,3,dtype=np.float32)
-    A = 1.1*tf.eye(3,3,dtype=np.float32)
-    Q = 0.01*tf.eye(3,3,dtype=np.float32)
-    # This was an attempt to make a correlated covariance matrix, it kind of works
-    # L = tf.constant([[0.5, 0.0, 0.0], [0.1, 0.1234, 0.0], [1.0, 0.8591, 2.0]], dtype=tf.float32)
-    # Q = 0.5*(L + tf.transpose(L))
-    C = tf.eye(2,3,dtype=np.float32)
-    R = 0.01*tf.eye(2,2,dtype=np.float32)
-    target_params = [init_pose,init_cov,A,Q,C,R]
+    loss_mean_out, loss_map_out = sess.run([loss_mean, loss_map])
+    mean_loss_samples.append(loss_mean_out)
+    map_loss_samples.append(loss_map_out)
 
-    # Create the session
-    sess = tf.Session()
+    # Compute error using the mean of the SMC trajectory samples
+    trajectory_mean = tf.reduce_mean(trajectory_samples_smc, axis=1)
+    sq_errors = (trajectory_ref - trajectory_mean)**2.0
+    loss_mean_smc = tf.reduce_sum(sq_errors, axis=1)
 
-    # Create the agent
-    rs = np.random.RandomState(1)# This remains fixed for the ground truth
-    td_agent = RangeBearingAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
+    # Compute error using the SMC MAP trajectory
+    sq_error = (trajectory_ref - trajectory_map_smc)**2.0
+    loss_map = tf.reduce_sum(sq_error, axis=1)
+    
+    loss_mean_out, loss_map_out = sess.run([loss_mean, loss_map])
+    mean_smc_loss_samples.append(loss_mean_out)
+    map_smc_loss_samples.append(loss_map_out)
 
-    # Generate observations TODO: change to numpy implementation
-    x_true, z_true = td_agent.generate_data()
-    xt_vals, zt_vals = sess.run([x_true, z_true])
+  # Save data
+  mean_loss_samples = np.squeeze(mean_loss_samples)
+  map_loss_samples = np.squeeze(map_loss_samples)
+  mean_smc_loss_samples = np.squeeze(mean_smc_loss_samples)
+  map_smc_loss_samples = np.squeeze(map_smc_loss_samples)
 
-    # Get posterior samples (since everything is linear Gaussian, just do Kalman filtering)
-    # TODO: change to numpy implementation
-    post_mean, post_cov = td_agent.lgss_posterior_params(zt_vals, 1)
-    p_mu, p_cov = sess.run([post_mean, post_cov])
-    post_values = td_agent.rs.multivariate_normal(mean=p_mu.ravel(), cov=p_cov, size=num_samps)
-    post_values = np.array(post_values).reshape((num_samps, td_agent.state_dim))
+  mean_loss_samples = np.reshape(mean_loss_samples, num_seeds*num_steps)
+  map_loss_samples = np.reshape(map_loss_samples, num_seeds*num_steps)
+  mean_smc_loss_samples = np.reshape(mean_smc_loss_samples, num_seeds*num_steps)
+  map_smc_loss_samples = np.reshape(map_smc_loss_samples, num_seeds*num_steps)
 
-    for seed in range(num_seeds):
-        sess = tf.Session()
-        tf.set_random_seed(seed)
-
-        # Summary writer
-        writer = tf.summary.FileWriter('./logs', sess.graph)
-
-        # Create the VCSLAM instance with above parameters
-        vcs = VCSLAM(sess = sess,
-                     vcs_agent = td_agent,
-                     observ = zt_vals,
-                     num_particles = num_train_particles,
-                     num_train_steps = num_train_steps,
-                     num_dependency_train_steps = num_dependency_train_steps,
-                     num_marginal_train_steps = num_marginal_train_steps,
-                     lr_d = lr_d,
-                     lr_m = lr_m,
-                     summary_writer = writer)
-
-        # Train the model
-        opt_proposal_params, train_sess = vcs.train(vcs_agent = td_agent)
-        opt_proposal_params = train_sess.run(opt_proposal_params)
-        opt_dep_params, opt_marg_params = opt_proposal_params
-        print(opt_proposal_params)
-        print("Optimal dep params: ", opt_dep_params)
-
-        # Sample the model
-        my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
-
-        # temporary
-        # my_vars = vcs.sim_q(opt_propsal_params, target_params, zt_vals, td_agent, num_samples=1, num_particles=num_query_particles)
-        # my_samples = [train_sess.run(my_vars) for i in range(num_samps)]
-        my_samples = train_sess.run(my_vars)
-        samples_np = np.squeeze(np.array(my_samples))
-        print(samples_np.shape)
-        plotting.plot_dist(samples_np,post_values)
-
-        # plots TODO: clean up more and add other relevant plots
-        xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
-        zt_vals = np.array(zt_vals)
-        plotting.plot_kde(samples_np,post_values,xt_vals,zt_vals)
-        plotting.plot_dist(samples_np,post_values)
-        # plt.show()
-
+  np.savetxt("loss_vcsmc_mean.csv", mean_loss_samples, delimiter=',')
+  np.savetxt("loss_vcsmc_map.csv", map_loss_samples, delimiter=',')
+  np.savetxt("loss_smc_mean.csv", mean_smc_loss_samples, delimiter=',')
+  np.savetxt("loss_smc_map.csv", map_smc_loss_samples, delimiter=',')

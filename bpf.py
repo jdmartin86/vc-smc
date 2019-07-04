@@ -253,8 +253,8 @@ class BootstrapParticleFilter():
             loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(-loss))
             summary_op = tf.summary.merge_all()
 
-            learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
-            learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
+            # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
+            # learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
 
             # Start the session
             self.sess.run(tf.global_variables_initializer())
@@ -263,5 +263,6 @@ class BootstrapParticleFilter():
 
             # Run everything:
             loss_curr = self.sess.run([loss])
+            print("ELBO: ", -loss_curr[0])
 
-        return proposal_params, self.sess
+        return proposal_params

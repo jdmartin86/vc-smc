@@ -5,6 +5,17 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
+"""
+copula_gaussian.py
+
+Contains a mixture of source code derived from TensorFlow Probability and
+original source code
+
+In each class we document whether the class is from TensorFlow Probability or
+original (for CoRL 2019)
+
+"""
+
 
 class NormalCDF(tfb.Bijector):
   """Bijector that encodes normal CDF and inverse CDF functions.
@@ -13,6 +24,8 @@ class NormalCDF(tfb.Bijector):
   and `forward` the inverse CDF (the reason for this convention is
   that inverse CDF methods for sampling are expressed a little more
   tersely this way).
+
+  From Tensorflow Probability
 
   """
   def __init__(self,loc=0.,scale=1.):
@@ -35,13 +48,8 @@ class NormalCDF(tfb.Bijector):
     return self.normal_dist.log_prob(x)
 
 class GaussianMixtureCDF(tfb.Bijector):
-  """Bijector that encodes Gaussian mixture CDF and inverse CDF functions.
-
-  We follow the convention that the `inverse` represents the CDF
-  and `forward` the inverse CDF (the reason for this convention is
-  that inverse CDF methods for sampling are expressed a little more
-  tersely this way).
-
+  """
+  For CoRL 2019
   """
   def __init__(self,ps=[1.], locs=[0.], scales=[1.]):
     self.mixture_dist = tfd.Mixture(
@@ -83,10 +91,19 @@ class Concat(tfb.Bijector):
   [x_0, ... x_n] with the transformation [F_0(x_0), F_1(x_1) ..., F_n(x_n)].
 
 
-  NOTE: This class does no error checking, so use with caution.
+  Params:
+    bijectors: List of tf.bijector objects
+    epsilon [optional]: Float, Used to ensure numerical stability of quantile
+      functions near boundaries
+    quantile_max [optional]: Float, Used to ensure numerical stability of
+      quantile functions near boundaries
+
+  From Tensorflow Probability
 
   """
-  def __init__(self, bijectors):
+  def __init__(self, bijectors, epsilon=10.0e-3, quantile_max=10.0e5):
+    self._epsilon = epsilon
+    self._quantile_max = quantile_max
     self._bijectors = bijectors
     super(Concat, self).__init__(
         forward_min_event_ndims=1,
@@ -99,20 +116,15 @@ class Concat(tfb.Bijector):
 
   def _forward(self, x):
     split_xs = tf.split(x, len(self.bijectors), -1)
-    # kjd: added "clip by value" to ensure inverse CDF doesn't explode
-    # kjd: tested and necessary
     # b_i.forward: [0, 1] -> R
-    # TODO: parameterize this clip
-    transformed_xs = [tf.clip_by_value(b_i.forward(x_i), clip_value_min=-10.0e5, clip_value_max=10.0e5) for b_i, x_i in zip(
+    transformed_xs = [tf.clip_by_value(b_i.forward(x_i), clip_value_min=-self._quantile_max, clip_value_max=self._quantile_max) for b_i, x_i in zip(
         self.bijectors, split_xs)]
     return tf.concat(transformed_xs, -1)
 
   # b_i.inverse: R -> [0,1]
-  # kjd: tested and necessary
-  # TODO: parameterize this epsilon=10.0e-5
   def _inverse(self, y):
     split_ys = tf.split(y, len(self.bijectors), -1)
-    transformed_ys = [tf.clip_by_value(b_i.inverse(y_i), clip_value_min=10.0e-3, clip_value_max=1.0-10.0e-3) for b_i, y_i in zip(
+    transformed_ys = [tf.clip_by_value(b_i.inverse(y_i), clip_value_min=self._epsilon, clip_value_max=1.0-self._epsilon) for b_i, y_i in zip(
         self.bijectors, split_ys)]
     return tf.concat(transformed_ys, -1)
 
@@ -140,6 +152,8 @@ class WarpedGaussianCopula(tfd.TransformedDistribution):
 
   The marginals are specified by `marginal_bijectors`: These are
   bijectors whose `inverse` encodes the CDF and `forward` the inverse CDF.
+
+  From Tensorflow Probability
   """
   def __init__(self, loc, scale_tril, marginal_bijectors):
     super(WarpedGaussianCopula, self).__init__(
@@ -149,13 +163,9 @@ class WarpedGaussianCopula(tfd.TransformedDistribution):
         name="GaussianCopula")
 
 class EmpiricalCDF(tfb.Bijector):
-  """Bijector that encodes normal CDF and inverse CDF functions.
+  """
 
-  We follow the convention that the `inverse` represents the CDF
-  and `forward` the inverse CDF (the reason for this convention is
-  that inverse CDF methods for sampling are expressed a little more
-  tersely this way).
-
+  For CoRL 2019
   """
   def __init__(self, samples=[0.,.1,.2,.3], interp='nearest'):
     self.dist = tfd.Empirical(samples=samples)
@@ -183,15 +193,11 @@ class EmpiricalCDF(tfb.Bijector):
     return self.dist.log_prob(x)
 
 class EmpGaussianMixtureCDF(tfb.Bijector):
-  """Bijector that encodes approx Gaussian mixture CDF and inverse CDF functions.
-
-  We follow the convention that the `inverse` represents the CDF
-  and `forward` the inverse CDF (the reason for this convention is
-  that inverse CDF methods for sampling are expressed a little more
-  tersely this way).
+  """
+  For CoRL 2019
 
   """
-  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=500, interp='nearest'):
+  def __init__(self,ps=[1.], locs=[0.], scales=[1.], n_samples=100, interp='nearest'):
     cat_dist = tfd.Categorical(probs=ps)
     comps = [tfd.Normal(loc=loc, scale=scale) for loc,scale in zip(locs, scales)]
     self.mixture_dist = tfd.Mixture(
@@ -220,14 +226,12 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
         output[j] = tfp.stats.percentile(self.samples[:,j], 100.*y[j])
     """
     y_shape=y.get_shape()
-    # percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation='nearest',axis=0)
     if len(self.samples.get_shape().as_list()) > 1:
       percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation=self.interp,axis=0)
       return tf.reshape(tf.diag_part(percentile_data), y_shape)
     else:
       percentile_data = tfp.stats.percentile(self.samples, 100.*tf.reshape(y,[-1]),interpolation=self.interp,axis=0)
       return tf.reshape(percentile_data, y_shape)
-    # return tfd.Normal(loc=self.mu1, scale=self.s1).quantile(y)
 
   def _inverse(self, x):
     # CDF of Gaussian mixture distribution.
@@ -238,7 +242,6 @@ class EmpGaussianMixtureCDF(tfb.Bijector):
 
   def _inverse_log_det_jacobian(self, x):
     # Log PDF of the Gaussian mixture distribution.
-    # return tfd.Normal(tf.transpose(self.mu1), self.s1).log_prob(x)
     if len(self.mixture_dist.batch_shape) < 1:
       return self.mixture_dist.log_prob(x)
     else:

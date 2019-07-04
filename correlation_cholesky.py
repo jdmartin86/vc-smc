@@ -12,7 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
-"""CorrelationCholesky bijector."""
+"""CorrelationCholesky bijector
+
+Contains our modified version of TensorFlow Probability's correlation_cholesky.py file
+
+Provides LKJ transform for mapping between minimal coordinates and Cholesky
+factors on the oblique manifold
+
+We use this for optimization of the Gaussian copula parameters.
+
+We retain a copy of the original Apache License and copyright notice
+
+"""
 
 from __future__ import absolute_import
 from __future__ import division

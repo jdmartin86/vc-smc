@@ -5,6 +5,14 @@ import copula_gaussian as cg
 import matplotlib.pyplot as plt
 import seaborn as sb
 
+"""
+gaussian_copula_example.py
+
+Code used to produce the Gaussian Copula examples in Figure 1
+
+For CoRL 2019
+"""
+
 # x CDF is a Gaussian mixture with two components
 x_probs = [0.5, 0.5]
 x_locs = [1.0, 4.0]
@@ -15,27 +23,53 @@ y_loc = 1.0
 y_scale = 1.0
 
 # Correlation parameter
-rho = 0.9
+rho1 = -0.9
+rho2 = 0.0
+rho3 = 0.9
 
 # Correlation matrix
-L_mat = tf.constant([[1., 0.], [rho, math.sqrt(1. - rho**2)]])
+L_mat1 = tf.constant([[1., 0.], [rho1, math.sqrt(1. - rho1**2)]])
+L_mat2 = tf.constant([[1., 0.], [rho2, math.sqrt(1. - rho2**2)]])
+L_mat3 = tf.constant([[1., 0.], [rho3, math.sqrt(1. - rho3**2)]])
 
 # Number of samples
 n_samples = 100000
 
 # Make CDF bijectors for each marginal
-x_cdf = cg.EmpGaussianMixtureCDF(ps=x_probs, locs=x_locs, scales=x_scales)
+x_cdf = cg.EmpGaussianMixtureCDF(ps=x_probs, locs=x_locs, scales=x_scales, n_samples=5000)
 y_cdf = cg.NormalCDF(loc=y_loc, scale=y_scale)
 
-# Build copula
-gc = cg.WarpedGaussianCopula(
+# Build copulae
+gc1 = cg.WarpedGaussianCopula(
     loc=[0., 0.],
-    scale_tril=L_mat,
+    scale_tril=L_mat1,
+    marginal_bijectors=[x_cdf, y_cdf])
+
+gc2 = cg.WarpedGaussianCopula(
+    loc=[0., 0.],
+    scale_tril=L_mat2,
+    marginal_bijectors=[x_cdf, y_cdf])
+
+gc3 = cg.WarpedGaussianCopula(
+    loc=[0., 0.],
+    scale_tril=L_mat3,
     marginal_bijectors=[x_cdf, y_cdf])
 
 # Do TensorFlow
 sess = tf.Session()
 
-samples = gc.sample(n_samples).eval(session=sess)
-sb.jointplot(samples[:,0], samples[:,1], kind='kde')
+samples1 = gc1.sample(n_samples).eval(session=sess)
+plot1 = sb.jointplot(samples1[:,0], samples1[:,1], kind='kde')
+plot1.ax_marg_x.set_xlim([-1,6])
+plot1.ax_marg_y.set_ylim([-2,4])
+
+samples2 = gc2.sample(n_samples).eval(session=sess)
+plot2 = sb.jointplot(samples2[:,0], samples2[:,1], kind='kde')
+plot2.ax_marg_x.set_xlim([-1,6])
+plot2.ax_marg_y.set_ylim([-2,4])
+
+samples3 = gc3.sample(n_samples).eval(session=sess)
+plot3 = sb.jointplot(samples3[:,0], samples3[:,1], kind='kde')
+plot3.ax_marg_x.set_xlim([-1,6])
+plot3.ax_marg_y.set_ylim([-2,4])
 plt.show()

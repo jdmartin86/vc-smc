@@ -1,3 +1,10 @@
+"""
+metrics.py
+
+Contains functions necessary for computing performance metrics of the VCSLAM
+algorithm and baselines
+
+"""
 import numpy as np
 import tensorflow as tf
 import scipy.stats as sps

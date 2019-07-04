@@ -7,6 +7,7 @@ import tensorflow_probability as tfp
 # tfb = tfp.bijectors
 import correlation_cholesky as cc
 from scipy.special import comb
+import scipy.stats as sps
 
 from vcsmc import *
 import vcslam_agent
@@ -16,6 +17,7 @@ import seaborn as sbs
 import matplotlib.pyplot as plt
 
 import copula_gaussian as cg
+import metrics
 
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -88,26 +90,19 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         T = self.num_steps
         Dx = self.state_dim
         """
-        marginal params for this problem are the means of the Gaussians at each time step (so 3 gaussians * T time steps) as well as the landmark location means (so num landmarks)
-
-        might also add the bias term?
+        Marginal params for this problem are the means of the Gaussians at each
+        time step (so 3 gaussians * T time steps) as well as the landmark
+        location means (so num landmarks = 3) which we place at the T+1 time step
 
         """
-        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
-        #          1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
-        #         for t in range(T)])
-        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
-        #                                   1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
-        #                         for t in range(T)]
-        #                        .extend([self.rs.randn(Dl)]))
-        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(4*Dx)]).ravel() # 3 MoG means per time step
+        # Random initialization of poses and landmarks
+        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(3*Dx)]).ravel() # 3 MoG means per time step
         #                                   for t in range(T+1)])
 
-        marg_params = np.array([np.array([self.prop_scale * self.rs.randn(3*Dx)]).ravel() # 3 MoG means per time step
-                                          for t in range(T+1)])
+        # Test initialization with prior landmark means
+        marg_params = np.vstack([np.array([np.array([self.prop_scale*self.rs.randn(3*Dx)]).ravel() for t in range(T)]),
+                                 np.array([0.0, 2.0, 6.0])])
 
-        # marg_params = np.array([np.array([0.0, 2.0, 6.0]).ravel() # 3 MoG means per time step
-        #                                   for t in range(T+1)])
         return marg_params
 
     def init_dependency_params(self):
@@ -370,20 +365,19 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         l2_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[2]]))
         l3_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[3]]))
         print("x sample shape: ", x_samples.get_shape().as_list())
+        logF = 0.0
+        logG = 0.0
         if t > 0:
-            logG = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
+            logF = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
         if t == 0 or t == 1:
             log_mixture_components = [tf.log(1./3.) + self.log_normal(x_samples, l1_samples, meas_var),
                                       tf.log(1./3.) + self.log_normal(x_samples, l2_samples, meas_var),
                                       tf.log(1./3.) + self.log_normal(x_samples, l3_samples, meas_var)]
             logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
-            # logG = tf.log((1./3.)*tf.exp(self.log_normal(x_samples, l1_samples, meas_var)) + \
-            #               (1./3.)*tf.exp(self.log_normal(x_samples, l2_samples, meas_var)) + \
-            #               (1./3.)*tf.exp(self.log_normal(x_samples, l3_samples, meas_var)))
         logH = self.log_normal(l1_samples, lm1_prior_mean, lm1_prior_var) + \
                self.log_normal(l2_samples, lm2_prior_mean, lm2_prior_var) + \
                self.log_normal(l3_samples, lm3_prior_mean, lm3_prior_var)
-        return logG + logH
+        return logF + logG + logH
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
@@ -402,21 +396,21 @@ if __name__ == '__main__':
     # Number of steps for the trajectory
     num_steps = 1
     # Number of particles to use during training
-    num_train_particles = 10000
+    num_train_particles = 100
     # Number of particles to use during SMC query
-    num_query_particles = 1000000
+    num_query_particles = 2000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 2000
+    num_train_steps = 4000
     # Learning rate for the marginal
     lr_m = 0.1
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 1
+    num_seeds = 10
     # Number of samples to use for plotting
-    num_samps = 200000
+    num_samps = 2000
     # Proposal initial scale
-    prop_scale = 1.0
+    prop_scale = 2.0
     # Copula initial scale
     cop_scale = 0.1
 
@@ -457,6 +451,7 @@ if __name__ == '__main__':
     # xt_vals, zt_vals = sess.run([x_true, z_true])
     zt_vals = None
 
+    all_kls = []
     for seed in range(num_seeds):
         config = tf.ConfigProto()
 
@@ -492,10 +487,26 @@ if __name__ == '__main__':
         samples_np = np.squeeze(np.array(my_samples))
         print(samples_np.shape)
 
-        sbs.distplot(samples_np[:,0], color='purple', norm_hist=True, kde_kws={'bw': 'silverman'})
-        sbs.distplot(samples_np[:,1], color='red', kde_kws={'bw': 'silverman'})
-        sbs.distplot(samples_np[:,2], color='green', kde_kws={'bw': 'silverman'})
-        sbs.distplot(samples_np[:,3], color='blue', kde_kws={'bw': 'silverman'})
+        pose_plot = sbs.distplot(samples_np[:,0], color='purple', norm_hist=True, kde_kws={'bw': 'scott'})
+        sbs.distplot(samples_np[:,1], color='red', kde_kws={'bw': 'scott'})
+        sbs.distplot(samples_np[:,2], color='green', kde_kws={'bw': 'scott'})
+        sbs.distplot(samples_np[:,3], color='blue', kde_kws={'bw': 'scott'})
 
         plt.show()
+
+
+        true_scale = tf.sqrt(meas_var + lm1_prior_var).eval(session=sess)
+        xs, ps = pose_plot.get_lines()[0].get_data()
+        qs = (1./3.)*sps.norm.pdf(xs, loc=0.0, scale=true_scale) + \
+             (1./3.)*sps.norm.pdf(xs, loc=2.0, scale=true_scale) + \
+             (1./3.)*sps.norm.pdf(xs, loc=6.0, scale=true_scale)
+        plt.plot(xs, ps)
+        plt.plot(xs, qs.ravel(), color="red")
+        plt.show()
+        approx_kl = metrics.kld(qs, ps, support=(np.max(xs) - np.min(xs)))
+        approx_kl = sess.run([approx_kl])
+        print("Approx KL: ", approx_kl)
+        all_kls.append(approx_kl)
+    print("Avg KL: ", np.mean(all_kls))
+    print("KL std: ", np.std(all_kls))
 

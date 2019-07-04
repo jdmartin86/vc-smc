@@ -7,8 +7,10 @@ import tensorflow_probability as tfp
 # tfb = tfp.bijectors
 import correlation_cholesky as cc
 from scipy.special import comb
+import scipy.stats as sps
+import scipy.interpolate as spi
 
-from vcsmc import *
+from bpf import *
 import vcslam_agent
 
 # Temporary
@@ -17,11 +19,14 @@ import matplotlib.pyplot as plt
 
 import copula_gaussian as cg
 
+# For evaluation
+import metrics
+
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
 tf.reset_default_graph()
 
-class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
+class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
     def __init__(self,
                  target_params,
                  num_steps=3,
@@ -72,7 +77,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #         cg.NormalCDF(loc=0., scale=1.)])
 
     def transition_model(self, x):
-        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
         return x + motion_mean
 
     def measurement_model(self, x):
@@ -82,7 +87,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return [self.num_steps, self.copula_dim]
 
     def get_marginal_param_shape(self):
-        return [self.num_steps+1, self.state_dim*3]
+        return [self.num_steps+1, self.state_dim*4]
 
     def init_marg_params(self):
         T = self.num_steps
@@ -100,7 +105,8 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #                                   1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
         #                         for t in range(T)]
         #                        .extend([self.rs.randn(Dl)]))
-        marg_params = np.array([np.array([self.prop_scale * self.rs.randn(3*Dx)]).ravel() # 3 MoG means per time step
+        # initial_x = self.prop_scale*self.rs.randn(1)
+        marg_params = np.array([np.array([0.0, 0.0, 2.0, 6.0]).ravel() # 3 MoG means per time step
                                           for t in range(T+1)])
         return marg_params
 
@@ -133,44 +139,28 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
     #     return x_true, z_true
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
-        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
         T = self.num_steps
         num_particles = x_prev.get_shape().as_list()[0]
         prop_copula_params = proposal_params[0]
         prop_marg_params = proposal_params[1]
 
         mu1t = prop_marg_params[t,0]
-        mu2t = prop_marg_params[t,1]
-        mu3t = prop_marg_params[t,2]
-        l1m = prop_marg_params[T,0]
-        l2m = prop_marg_params[T,1]
-        l3m = prop_marg_params[T,2]
+        l1m = prop_marg_params[T,1]
+        l2m = prop_marg_params[T,2]
+        l3m = prop_marg_params[T,3]
 
         if t == 0:
             mu1 = mu1t
-            mu2 = mu2t
-            mu3 = mu3t
         if t > 0:
             mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
-            mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
-            mu3 = mu3t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
 
-        # if t > 0:
-        #     mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
-        # else:
-        #     mu = mut + lint*tf.transpose(init_pose)
+        if t == 0:
+            x_scale = tf.sqrt(init_var)
+        if t > 0:
+            x_scale = tf.sqrt(motion_var)
 
-        # Copula params are defined over the reals, but we want a correlation matrix
-        # So we use a sigmoid map to take reals to the range [-1,1]
-        # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
-        r_vec = prop_copula_params[t,:]
-        L_mat = cc.CorrelationCholesky().forward(r_vec)
-        print("L Mat shape: ", L_mat.get_shape().as_list())
-
-        # Marginal bijectors will be the CDFs of the univariate marginals Here
-        # these are normal CDFs
-        # x_cdf = cg.GaussianMixtureCDF(ps=[1./3., 1./3., 1./3.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
-        x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
+        x_cdf = cg.NormalCDF(loc=mu1, scale=x_scale)
         l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
         l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
         l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
@@ -181,16 +171,13 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
         gc = cg.WarpedGaussianCopula(
             loc=[0., 0., 0., 0.],
-            scale_tril=L_mat,
+            scale_tril=tf.eye(4),
             marginal_bijectors=[
                 x_cdf,
                 l1_cdf,
                 l2_cdf,
                 l3_cdf])
-        # self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
-        # self.copula_s.distribution.scale_tril = L_mat
 
-        # sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
         return gc.sample(x_prev.get_shape().as_list()[0])
 
     def log_proposal(self,t,x_curr,x_prev,observ,proposal_params):
@@ -200,7 +187,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         prop_copula_params, prop_marg_params = proposal_params
 
         # Extract params here
-        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
 
         T = self.num_steps
         num_particles = x_prev.get_shape().as_list()[0]
@@ -208,33 +195,25 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         prop_marg_params = proposal_params[1]
 
         mu1t = prop_marg_params[t,0]
-        mu2t = prop_marg_params[t,1]
-        mu3t = prop_marg_params[t,2]
-        l1m = prop_marg_params[T,0]
-        l2m = prop_marg_params[T,1]
-        l3m = prop_marg_params[T,2]
+        l1m = prop_marg_params[T,1]
+        l2m = prop_marg_params[T,2]
+        l3m = prop_marg_params[T,3]
 
         if t == 0:
             mu1 = mu1t
-            mu2 = mu2t
-            mu3 = mu3t
         if t > 0:
             transition = tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
             mu1 = mu1t + transition
-            mu2 = mu2t + transition
-            mu3 = mu3t + transition
 
-        # Copula params are defined over the reals, but we want a correlation matrix
-        # So we use a sigmoid map to take reals to the range [-1,1]
-        # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
-        # use correlationcholesky to do the right thing
-        r_vec = prop_copula_params[t,:]
-        L_mat = cc.CorrelationCholesky().forward(r_vec)
+        if t == 0:
+            x_scale = tf.sqrt(init_var)
+        if t > 0:
+            x_scale = tf.sqrt(motion_var)
 
         # Marginal bijectors will be the CDFs of the univariate marginals Here
         # these are normal CDFs and GaussianMixtureCDF
         # x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
-        x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var[0,0]))
+        x_cdf = cg.NormalCDF(loc=mu1, scale=x_scale)
         l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
         l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
         l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
@@ -245,7 +224,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
         gc = cg.WarpedGaussianCopula(
             loc=[0., 0., 0., 0.],
-            scale_tril=L_mat, # TODO This is currently just eye(3), use L_mat!
+            scale_tril=tf.eye(4), # TODO This is currently just eye(3), use L_mat!
             marginal_bijectors=[
                 x_cdf,
                 l1_cdf,
@@ -266,7 +245,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
     def log_target(self, t, x_curr, x_prev, observ):
         # init_pose, init_cov, A, Q, C, R = self.target_params
-        lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
         print("X curr shape: ", x_curr.get_shape().as_list())
         x_prev_samples = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[0]]))
         x_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[0]]))
@@ -274,16 +253,19 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         l2_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[2]]))
         l3_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[3]]))
         print("x sample shape: ", x_samples.get_shape().as_list())
+        logF = 0.0
+        logG = 0.0
         if t > 0:
-            logG = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
+            logF = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
         if t == 0 or t == 1:
-            logG = tf.log((1./3.)*tf.exp(self.log_normal(x_samples, l1_samples, meas_var)) + \
-                          (1./3.)*tf.exp(self.log_normal(x_samples, l2_samples, meas_var)) + \
-                          (1./3.)*tf.exp(self.log_normal(x_samples, l3_samples, meas_var)))
+            log_mixture_components = [tf.log(1./3.) + self.log_normal(x_samples, l1_samples, meas_var),
+                                      tf.log(1./3.) + self.log_normal(x_samples, l2_samples, meas_var),
+                                      tf.log(1./3.) + self.log_normal(x_samples, l3_samples, meas_var)]
+            logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
         logH = self.log_normal(l1_samples, lm1_prior_mean, lm1_prior_var) + \
                self.log_normal(l2_samples, lm2_prior_mean, lm2_prior_var) + \
                self.log_normal(l3_samples, lm3_prior_mean, lm3_prior_var)
-        return logG + logH
+        return logF + logG + logH
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
@@ -300,11 +282,11 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 2
+    num_steps = 1
     # Number of particles to use during training
     num_train_particles = 100
     # Number of particles to use during SMC query
-    num_query_particles = 1000000
+    num_query_particles = 2000
     # Number of iterations to fit the proposal parameters
     num_train_steps = 2000
     # Learning rate for the marginal
@@ -312,11 +294,11 @@ if __name__ == '__main__':
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 1
+    num_seeds = 10
     # Number of samples to use for plotting
-    num_samps = 10000
+    num_samps = 2000
     # Proposal initial scale
-    prop_scale = 0.5
+    prop_scale = 2.0
     # Copula initial scale
     cop_scale = 0.1
 
@@ -331,7 +313,10 @@ if __name__ == '__main__':
     motion_mean = 2.0*tf.ones([1,1],dtype=tf.float32)
     motion_var = 0.1*tf.ones([1,1],dtype=tf.float32)
     meas_var = 0.1*tf.ones([1,1],dtype=tf.float32)
-    target_params = [lm1_prior_mean, lm1_prior_var,
+    init_mean = tf.zeros([1,1], dtype=tf.float32)
+    init_var = 5.0*meas_var
+    target_params = [init_mean, init_var,
+                     lm1_prior_mean, lm1_prior_var,
                      lm2_prior_mean, lm2_prior_var,
                      lm3_prior_mean, lm3_prior_var,
                      motion_mean, motion_var,
@@ -342,13 +327,14 @@ if __name__ == '__main__':
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
-    td_agent = ThreeDoorsAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
+    td_agent = ThreeDoorsGaussianBPFAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
 
     # Generate observations TODO: change to numpy implementation
     # x_true, z_true = td_agent.generate_data()
     # xt_vals, zt_vals = sess.run([x_true, z_true])
     zt_vals = None
 
+    all_kls = []
     for seed in range(num_seeds):
         sess = tf.Session()
         tf.set_random_seed(seed)
@@ -357,7 +343,7 @@ if __name__ == '__main__':
         writer = tf.summary.FileWriter('./logs', sess.graph)
 
         # Create the VCSLAM instance with above parameters
-        vcs = VCSLAM(sess = sess,
+        vcs = BootstrapParticleFilter(sess = sess,
                      vcs_agent = td_agent,
                      observ = zt_vals,
                      num_particles = num_train_particles,
@@ -367,8 +353,8 @@ if __name__ == '__main__':
                      summary_writer = writer)
 
         # Train the model
-        opt_proposal_params, train_sess = vcs.train(vcs_agent = td_agent)
-        opt_proposal_params = train_sess.run(opt_proposal_params)
+        opt_proposal_params = vcs.train(vcs_agent = td_agent)
+        opt_proposal_params = sess.run(opt_proposal_params)
         opt_dep_params, opt_marg_params = opt_proposal_params
         print(opt_proposal_params)
         print("Optimal dep params: ", opt_dep_params)
@@ -376,7 +362,7 @@ if __name__ == '__main__':
         # Sample the model
         my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
 
-        my_samples = train_sess.run(my_vars)
+        my_samples = sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
         print(samples_np.shape)
 
@@ -385,10 +371,32 @@ if __name__ == '__main__':
         # zt_vals = np.array(zt_vals)
         # plotting.plot_kde(samples_np,None,xt_vals,zt_vals)
         # plotting.plot_dist(samples_np,None)
-        sbs.distplot(samples_np[:,0], color='purple')
-        sbs.distplot(samples_np[:,1], color='red')
-        sbs.distplot(samples_np[:,2], color='green')
-        sbs.distplot(samples_np[:,3], color='blue')
-
+        pose_plot = sbs.kdeplot(samples_np[:,0], color='purple')
+        # sbs.distplot(samples_np[:,0], color='purple')
+        sbs.kdeplot(samples_np[:,1], color='red')
+        # sbs.distplot(samples_np[:,1], color='red', kde_kws={'bw': 2.0})
+        # sbs.distplot(samples_np[:,2], color='green')
+        sbs.kdeplot(samples_np[:,2], color='green')
+        # sbs.distplot(samples_np[:,3], color='blue')
+        sbs.kdeplot(samples_np[:,3], color='blue')
         plt.show()
+
+        true_scale = tf.sqrt(meas_var + lm1_prior_var).eval(session=sess)
+        xs = np.linspace(-2.0, 8.0, 100)
+        orig_xs, orig_ps = pose_plot.get_lines()[0].get_data()
+        ps = spi.interp1d(orig_xs, orig_ps,fill_value=np.array(1e-10), bounds_error=False)(xs)
+
+        qs = (1./3.)*sps.norm.pdf(xs, loc=0.0, scale=true_scale) + \
+             (1./3.)*sps.norm.pdf(xs, loc=2.0, scale=true_scale) + \
+             (1./3.)*sps.norm.pdf(xs, loc=6.0, scale=true_scale)
+        plt.plot(xs, ps)
+        plt.plot(xs, qs.ravel(), color="red")
+        plt.show()
+        approx_kl = metrics.kld(qs, ps, support=(np.max(xs) - np.min(xs)))
+        approx_kl = sess.run([approx_kl])
+        print("Approx KL: ", approx_kl)
+        all_kls.append(approx_kl)
+    print("Avg KL: ", np.mean(all_kls))
+    print("KL std: ", np.std(all_kls))
+
 

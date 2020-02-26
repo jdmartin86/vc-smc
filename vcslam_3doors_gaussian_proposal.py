@@ -9,6 +9,8 @@ import correlation_cholesky as cc
 from scipy.special import comb
 import scipy.stats as sps
 import scipy.interpolate as spi
+import math
+import csv
 
 from bpf import *
 import vcslam_agent
@@ -118,25 +120,25 @@ class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
                                   for t in range(T)])
         return copula_params
 
-    # def generate_data(self):
-    #     init_pose, init_cov, A, Q, C, R = self.target_params
-    #     Dx = init_pose.get_shape().as_list()[0]
-    #     Dz = R.get_shape().as_list()[0]
+    def generate_data(self):
+        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var,lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        Dx = init_mean.get_shape().as_list()[0]
+        #Dz = R.get_shape().as_list()[0]
 
-    #     x_true = []
-    #     z_true = []
+        x_true = []
+        #z_true = []
 
-    #     for t in range(self.num_steps):
-    #         if t > 0:
-    #             x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.transition_model(x_true[t-1])),
-    #                                                                covariance_matrix=Q).sample(seed=self.rs.randint(0,1234))))
-    #         else:
-    #             x_sample = init_pose
-    #             x_true.append(x_sample)
-    #         z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.measurement_model(x_true[t])),
-    #                                                            covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
+        for t in range(self.num_steps):
+            if t > 0:
+                x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.transition_model(x_true[t-1])),
+                                                                   covariance_matrix=Q).sample(seed=self.rs.randint(0,1234))))
+            else:
+                x_sample = init_mean
+                x_true.append(x_sample)
+            #z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.measurement_model(x_true[t])),
+                                                               #covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
 
-    #     return x_true, z_true
+        return x_true#, z_true
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
         init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
@@ -288,13 +290,13 @@ if __name__ == '__main__':
     # Number of particles to use during SMC query
     num_query_particles = 2000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 2000
+    num_train_steps = 4000
     # Learning rate for the marginal
     lr_m = 0.1
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 10
+    num_seeds = 100
     # Number of samples to use for plotting
     num_samps = 2000
     # Proposal initial scale
@@ -330,11 +332,29 @@ if __name__ == '__main__':
     td_agent = ThreeDoorsGaussianBPFAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
 
     # Generate observations TODO: change to numpy implementation
-    # x_true, z_true = td_agent.generate_data()
-    # xt_vals, zt_vals = sess.run([x_true, z_true])
+    #x_true = td_agent.generate_data()
+    #xt_vals = sess.run([x_true])
+    truth = np.array([[0, 0, 2, 4],[2, 0, 2, 6],[4, 0, 2, 6]], np.int64)
+    np.savetxt('output/trajectory_ref.txt', truth, delimiter=',')
+    
     zt_vals = None
 
     all_kls = []
+
+    error_1 = []
+    mean_1 = []
+    std_1 = []
+    confidence_1 = []
+
+    error_2 = []
+    mean_2 = []
+    std_2 = []
+    confidence_2 = []
+
+    error_3 = []
+    mean_3 = []
+    std_3 = []
+    confidence_3 = []
     for seed in range(num_seeds):
         sess = tf.Session()
         tf.set_random_seed(seed)
@@ -356,30 +376,68 @@ if __name__ == '__main__':
         opt_proposal_params = vcs.train(vcs_agent = td_agent)
         opt_proposal_params = sess.run(opt_proposal_params)
         opt_dep_params, opt_marg_params = opt_proposal_params
-        print(opt_proposal_params)
-        print("Optimal dep params: ", opt_dep_params)
+        #print(opt_proposal_params)
+        #print("Optimal dep params: ", opt_dep_params)
 
         # Sample the model
         my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
 
         my_samples = sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
-        print(samples_np.shape)
+        #print(samples_np.shape)
+
+        trajectory_mean = np.mean(samples_np, 0)
+        trajectory_std = np.std(samples_np, 0)
+        sq_errors = []
+        conf_interval = []
+        for i in range(4):
+            #compute the mean squared error
+            er_sq = (truth[num_steps-1,i]-trajectory_mean[i])**2
+            sq_errors = np.append(sq_errors, er_sq)
+
+            #compute the lower and upper bounds at 95% confidence interval
+            lower_bound = trajectory_mean[i]-abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
+            upper_bound = trajectory_mean[i]+abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
+            conf_interval = np.append(conf_interval, [lower_bound, upper_bound])
+
+        #save data based on how many steps
+        if num_steps == 1:
+            error_1 = np.r_[error_1, sq_errors]
+            mean_1 = np.r_[mean_1, trajectory_mean]
+            std_1 = np.r_[std_1, trajectory_std]
+            confidence_1 = np.r_[confidence_1, conf_interval]
+        elif num_steps == 2:
+            error_2 = np.r_[error_2, sq_errors]
+            mean_2 = np.r_[mean_2, trajectory_mean]
+            std_2 = np.r_[std_2, trajectory_std]
+            confidence_2 = np.r_[confidence_2, conf_interval]
+        elif num_steps == 3:
+            error_3 = np.r_[error_3, sq_errors]
+            mean_3 = np.r_[mean_3, trajectory_mean]
+            std_3 = np.r_[std_3, trajectory_std]
+            confidence_3 = np.r_[confidence_3, conf_interval]
+
 
         # plots TODO: clean up more and add other relevant plots
         # xt_vals = np.array(xt_vals).reshape(td_agent.num_steps, td_agent.state_dim)
         # zt_vals = np.array(zt_vals)
         # plotting.plot_kde(samples_np,None,xt_vals,zt_vals)
         # plotting.plot_dist(samples_np,None)
-        pose_plot = sbs.kdeplot(samples_np[:,0], color='purple')
+        ##pose_plot = sbs.kdeplot(samples_np[:,0], color='purple')
         # sbs.distplot(samples_np[:,0], color='purple')
-        sbs.kdeplot(samples_np[:,1], color='red')
+        ##sbs.kdeplot(samples_np[:,1], color='red')
         # sbs.distplot(samples_np[:,1], color='red', kde_kws={'bw': 2.0})
         # sbs.distplot(samples_np[:,2], color='green')
-        sbs.kdeplot(samples_np[:,2], color='green')
+        ##sbs.kdeplot(samples_np[:,2], color='green')
         # sbs.distplot(samples_np[:,3], color='blue')
-        sbs.kdeplot(samples_np[:,3], color='blue')
-        plt.show()
+        ##sbs.kdeplot(samples_np[:,3], color='blue')
+        
+        pose_plot = sbs.distplot(samples_np[:,0], color='purple', norm_hist=True, kde_kws={'bw': 'scott'})
+        sbs.distplot(samples_np[:,1], color='red', kde_kws={'bw': 'scott'})
+        sbs.distplot(samples_np[:,2], color='green', kde_kws={'bw': 'scott'})
+        sbs.distplot(samples_np[:,3], color='blue', kde_kws={'bw': 'scott'})
+        
+        #plt.show()
 
         true_scale = tf.sqrt(meas_var + lm1_prior_var).eval(session=sess)
         xs = np.linspace(-2.0, 8.0, 100)
@@ -389,13 +447,88 @@ if __name__ == '__main__':
         qs = (1./3.)*sps.norm.pdf(xs, loc=0.0, scale=true_scale) + \
              (1./3.)*sps.norm.pdf(xs, loc=2.0, scale=true_scale) + \
              (1./3.)*sps.norm.pdf(xs, loc=6.0, scale=true_scale)
-        plt.plot(xs, ps)
-        plt.plot(xs, qs.ravel(), color="red")
-        plt.show()
+        ##plt.plot(xs, ps)
+        ##plt.plot(xs, qs.ravel(), color="red")
+        ##plt.show()
         approx_kl = metrics.kld(qs, ps, support=(np.max(xs) - np.min(xs)))
         approx_kl = sess.run([approx_kl])
         print("Approx KL: ", approx_kl)
         all_kls.append(approx_kl)
+    if num_steps == 1:
+        with open('output/BPFerror_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(error_1[j:j+4])
+        with open('output/BPFmean_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(mean_1[j:j+4])
+        with open('output/BPFstd_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(std_1[j:j+4])
+        with open('output/BPFconfidence_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
+            for i in range(num_seeds):
+                j = i*8
+                file_writer.writerow(confidence_1[j:j+8])
+    elif num_steps == 2:
+        with open('output/BPFerror_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(error_2[j:j+4])
+        with open('output/BPFmean_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(mean_2[j:j+4])
+        with open('output/BPFstd_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(std_2[j:j+4])
+        with open('output/BPFconfidence_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
+            for i in range(num_seeds):
+                j = i*8
+                file_writer.writerow(confidence_2[j:j+8])
+    elif num_steps == 3:
+        with open('output/BPFerror_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(error_3[j:j+4])
+        with open('output/BPFmean_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(mean_3[j:j+4])
+        with open('output/BPFstd_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(std_3[j:j+4])
+        with open('output/BPFconfidence_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
+            for i in range(num_seeds):
+                j = i*8
+                file_writer.writerow(confidence_3[j:j+8])
     print("Avg KL: ", np.mean(all_kls))
     print("KL std: ", np.std(all_kls))
 

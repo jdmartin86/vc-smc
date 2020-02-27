@@ -11,18 +11,18 @@ class BootstrapParticleFilter():
     parameters, it simply leaves the proposal as the transition model
     """
     def __init__(self,
-                sess,
-                vcs_agent,
-                observ,
-                num_particles,
-                num_train_steps = 1000,
-                num_dependency_train_steps = 1,
-                num_marginal_train_steps = 1,
-                lr_d = 0.0001,
-                lr_m = 0.0001,
-                adapt_resamp = False,
-                summary_writer=None,
-                summary_writing_frequency=500):
+                 sess,
+                 vcs_agent,
+                 observ,
+                 num_particles,
+                 num_train_steps = 1000,
+                 num_dependency_train_steps = 1,
+                 num_marginal_train_steps = 1,
+                 lr_d = 0.0001,
+                 lr_m = 0.0001,
+                 adapt_resamp = False,
+                 summary_writer=None,
+                 summary_writing_frequency=500):
         # TF Session
         self.sess = sess
         # VC-SLAM agent
@@ -48,7 +48,6 @@ class BootstrapParticleFilter():
         self.adapt_resamp = adapt_resamp
         # log_weights: A Tensor of shape (num_particles, num_steps)
         #  containing the log weights at each timestep of the particle filter.
-        # self.logw = tf.random_uniform((self.num_particles,self.num_steps),min=0.0,max=1.0)
 
         # Training procedure is Adam
         self.optimizer = tf.train.AdamOptimizer
@@ -64,7 +63,7 @@ class BootstrapParticleFilter():
         # Marginal model learning rate
         self.lr_m = lr_m
         # Cached constant: the logarithm of the number of particles
-        self.log_num_particles = tf.log(tf.to_float(self.num_particles))
+        self.log_num_particles =np.log(float(self.num_particles))
 
         # Tensorboard summary writer and log frequency
         self.summary_writer = summary_writer
@@ -113,12 +112,12 @@ class BootstrapParticleFilter():
 
         """
         # Initialize SMC
-        x_curr = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
-        x_prev = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
+        x_curr = np.zeros((self.num_particles,self.latent_dim), dtype=np.float32)
+        x_prev = np.zeros((self.num_particles,self.latent_dim), dtype=np.float32)
 
         # Unnormalized particle weights
-        logw_tilde = tf.zeros(dtype=tf.float32,shape=(self.num_particles))
-        logZ = tf.zeros(dtype=tf.float32,shape=(1))
+        logw_tilde = np.zeros((self.num_particles), dtype=np.float32)
+        logZ = 0.
 
         # For effective sample size (ESS) calculations
         # TODO: implement after testing regular resampling (04/22)
@@ -142,8 +141,6 @@ class BootstrapParticleFilter():
             # TODO: Revisit the arguments when you implement the class with the proposal and couplas
             x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, proposal_params)
             # x_curr = vcs_agent.sim_proposal(t, x_prev, self.observ, self.num_particles, proposal_params)
-            print("VSMC shape of x_prev: ", x_prev.get_shape().as_list())
-            print("VSMC shape of x_curr: ", x_curr.get_shape().as_list())
 
             # Weighting
             # Get the log weights for the current timestep
@@ -175,55 +172,63 @@ class BootstrapParticleFilter():
             num_particles = self.num_particles
 
         # Initialize SMC
-        x_curr = tf.zeros(dtype=tf.float32,shape=(self.num_steps,num_particles,self.latent_dim))
-        x_prev = tf.zeros(dtype=tf.float32,shape=(num_particles,self.latent_dim))
+        with tf.variable_scope('sim_q', reuse=tf.AUTO_REUSE):
+            x_curr = np.zeros((self.num_steps,
+                               num_particles,
+                               self.latent_dim),
+                              dtype=np.float32)
+            x_prev = np.zeros((num_particles,self.latent_dim),
+                              dtype=np.float32,)
 
-        # Unnormalized particle weights
-        logw_tilde = tf.zeros(dtype=tf.float32,shape=(num_particles))
-        logZ = tf.zeros(dtype=tf.float32,shape=(1))
+            # Unnormalized particle weights
+            logw_tilde =np.zeros(num_particles, dtype=np.float32)
+            logZ = 0.
 
-        X = tf.zeros(dtype=tf.float32, shape=(self.num_steps, num_particles, self.latent_dim))
+            X = np.zeros((self.num_steps,
+                          num_particles,
+                          self.latent_dim),
+                         dtype=np.float32)
 
-        # For effective sample size (ESS) calculations
-        # TODO: implement after testing regular resampling (04/22)
-        #w      = tf.nn.softmax(logits=logW)
-        #ESS = 1./np.sum(W**2)/N
+            # For effective sample size (ESS) calculations
+            # TODO: implement after testing regular resampling (04/22)
+            #w      = tf.nn.softmax(logits=logW)
+            #ESS = 1./np.sum(W**2)/N
 
-        # start_smc = timeit.default_timer()
-        for t in range(self.num_steps):
-            # Resampling
-            # Shape of x_prev (num_particles,latent_dim)
-            if t > 0:
-                ancestors = self.resampling(logw_tilde, num_particles)
-                x_prev = tf.gather(x_curr,ancestors,axis=0) #TODO: this indexing won't work - just for prototyping
-            else:
-                x_prev = x_curr[0,:,:]
+            for t in range(self.num_steps):
+                # Resampling
+                # Shape of x_prev (num_particles,latent_dim)
+                if t > 0:
+                    ancestors = self.resampling(logw_tilde, num_particles)
+                    x_prev = tf.gather(x_curr, ancestors, axis=0) #TODO: this indexing won't work - just for prototyping
+                else:
+                    x_prev = x_curr[0,:,:]
 
-            # Propagation
-            # This simulates one transition from the proposal distribution
-            # Shape of x_curr (num_particles,latent_dim)
-            # TODO: Revisit the arguments when you implement the class with the proposal and couplas
-            x_curr = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
+                # Propagation
+                # This simulates one transition from the proposal distribution
+                # Shape of x_curr (num_particles,latent_dim)
+                # TODO: Revisit the arguments when you implement the class with the proposal and couplas
+                x_curr = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
 
-            # Weighting
-            # Get the log weights for the current timestep
-            # Shape of logw_tilde (num_particles)
-            logw_tilde = vcs_obj.log_weights(t, x_curr, x_prev, self.observ, prop_params)
-            # print(logw_tilde)
-            max_logw_tilde = tf.math.reduce_max(logw_tilde)
-            logw_tilde_adj = logw_tilde - max_logw_tilde
-            logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(num_particles)) + max_logw_tilde
+                # Weighting
+                # Get the log weights for the current timestep
+                # Shape of logw_tilde (num_particles)
+                logw_tilde = vcs_obj.log_weights(t, x_curr, x_prev, self.observ, prop_params)
+                # print(logw_tilde)
+                max_logw_tilde = tf.math.reduce_max(logw_tilde)
+                logw_tilde_adj = logw_tilde - max_logw_tilde
+                logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(num_particles)) + max_logw_tilde
 
-            # Not sure if this is correct at all - Kevin
-            W = tf.exp(logw_tilde_adj)
-            W /= tf.reduce_sum(W)
-            logW = tf.log(W)
+                # Not sure if this is correct at all - Kevin
+                W = tf.exp(logw_tilde_adj)
+                W /= tf.reduce_sum(W)
+                logW = tf.log(W)
 
-            #w = tf.nn.softmax(logits=logw_tilde_adj)
-            #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
+                #w = tf.nn.softmax(logits=logw_tilde_adj)
+                #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
-        Bs = self.sample_traj(logw_tilde, num_samples)
-        return tf.gather(x_curr,Bs,axis=0)
+            Bs = self.sample_traj(logw_tilde, num_samples)
+            import ipdb; ipdb.set_trace()
+            return tf.gather(x_curr,Bs,axis=0)
 
     def train(self,vcs_agent):
         """
@@ -231,7 +236,6 @@ class BootstrapParticleFilter():
         This actually doesn't train anything for the bootstrap particle filter
         It was simply made to mirror the syntax of vcsmc.py
         """
-        print("Starting training")
         dependency_initializer = tf.constant_initializer(vcs_agent.init_dependency_params())
         marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
 
@@ -253,13 +257,10 @@ class BootstrapParticleFilter():
             loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(-loss))
             summary_op = tf.summary.merge_all()
 
-            # learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
-            # learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
-
             # Start the session
             self.sess.run(tf.global_variables_initializer())
-            print("Original dep params:\n", dependency_params.eval(session=self.sess))
-            print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
+            #print("Original dep params:\n", dependency_params.eval(session=self.sess))
+            #print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
 
             # Run everything:
             loss_curr = self.sess.run([loss])

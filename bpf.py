@@ -227,7 +227,6 @@ class BootstrapParticleFilter():
                 #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
             Bs = self.sample_traj(logw_tilde, num_samples)
-            import ipdb; ipdb.set_trace()
             return tf.gather(x_curr,Bs,axis=0)
 
     def train(self,vcs_agent):

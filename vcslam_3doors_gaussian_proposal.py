@@ -64,8 +64,7 @@ class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
         self.rs = rs
 
     def transition_model(self, x):
-        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
-        return x + motion_mean
+        return x + self.target_params[8]
 
     def measurement_model(self, x):
         return 0.
@@ -85,14 +84,6 @@ class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
         might also add the bias term?
 
         """
-        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
-        #          1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
-        #         for t in range(T)])
-        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(Dx), # Bias
-        #                                   1. + self.prop_scale * self.rs.randn(Dx)]).ravel() # Linear times A/mu0
-        #                         for t in range(T)]
-        #                        .extend([self.rs.randn(Dl)]))
-        # initial_x = self.prop_scale*self.rs.randn(1)
         marg_params = np.array([np.array([0.0, 0.0, 2.0, 6.0]).ravel() # 3 MoG means per time step
                                           for t in range(T+1)])
         return marg_params
@@ -150,9 +141,9 @@ class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
                 x_scale = np.sqrt(motion_var)
 
             x_cdf = cg.NormalCDF(loc=mu1, scale=x_scale)
-            l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
-            l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
-            l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
+            l1_cdf = cg.NormalCDF(loc=l1m, scale=np.sqrt(lm1_prior_var))
+            l2_cdf = cg.NormalCDF(loc=l2m, scale=np.sqrt(lm2_prior_var))
+            l3_cdf = cg.NormalCDF(loc=l3m, scale=np.sqrt(lm3_prior_var))
 
             # Build a copula (can also store globally if we want) we would just
             #  have to modify self.copula.scale_tril and
@@ -345,7 +336,6 @@ if __name__ == '__main__':
         start = time.time()
         tf.reset_default_graph()
         tf.set_random_seed(seed)
-        import ipdb
         graph_vars = [n.name for n in tf.get_default_graph().as_graph_def().node]
 
         # Create the VCSLAM instance with above parameters

@@ -19,9 +19,11 @@ import matplotlib.pyplot as plt
 import copula_gaussian as cg
 import metrics
 
+import time
+
+
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
-tf.reset_default_graph()
 
 class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
     def __init__(self,
@@ -55,8 +57,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         self.copula_dim = int(comb(self.latent_dim,2))
         # Observation dimensionality (direct observations of x_door)
         self.observ_dim = observ_dim
-        # Proposal params
-        self.proposal_params = tf.placeholder(dtype=tf.float32,shape=(10,1))
 
         self.prop_scale = prop_scale
         self.cop_scale = cop_scale
@@ -113,130 +113,68 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                                   for t in range(T)])
         return copula_params
 
-    # def generate_data(self):
-    #     init_pose, init_cov, A, Q, C, R = self.target_params
-    #     Dx = init_pose.get_shape().as_list()[0]
-    #     Dz = R.get_shape().as_list()[0]
-
-    #     x_true = []
-    #     z_true = []
-
-    #     for t in range(self.num_steps):
-    #         if t > 0:
-    #             x_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.transition_model(x_true[t-1])),
-    #                                                                covariance_matrix=Q).sample(seed=self.rs.randint(0,1234))))
-    #         else:
-    #             x_sample = init_pose
-    #             x_true.append(x_sample)
-    #         z_true.append(tf.transpose(tfd.MultivariateNormalFullCovariance(loc=tf.transpose(self.measurement_model(x_true[t])),
-    #                                                            covariance_matrix=R).sample(seed=self.rs.randint(0,1234))))
-
-    #     return x_true, z_true
-
     def sim_proposal(self, t, x_prev, observ, proposal_params):
-        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
-        T = self.num_steps
-        num_particles = x_prev.get_shape().as_list()[0]
-        prop_copula_params = proposal_params[0]
-        prop_marg_params = proposal_params[1]
+        with tf.variable_scope("sim_proposal", reuse=tf.AUTO_REUSE):
+            
+            init_mean, init_var, lm1_prior_mean,\
+            lm1_prior_var, lm2_prior_mean, lm2_prior_var,\
+            lm3_prior_mean, lm3_prior_var, motion_mean, \
+            motion_var, meas_var = self.target_params
+            
+            num_particles = np.shape(x_prev)[0]
+            prop_copula_params = proposal_params[0]
+            prop_marg_params = proposal_params[1]
 
-        mu1t = prop_marg_params[t,0]
-        mu2t = prop_marg_params[t,1]
-        mu3t = prop_marg_params[t,2]
-        # mu4t = prop_marg_params[t,3]
-        # logs2t = prop_marg_params[t,3]
-        l1m = prop_marg_params[T,0]
-        l2m = prop_marg_params[T,1]
-        l3m = prop_marg_params[T,2]
+            mu1t = prop_marg_params[t,0]
+            mu2t = prop_marg_params[t,1]
+            mu3t = prop_marg_params[t,2]
 
-        # l1m = lm1_prior_mean
-        # l2m = lm2_prior_mean
-        # l3m = lm3_prior_mean
+            l1m = prop_marg_params[self.num_steps,0]
+            l2m = prop_marg_params[self.num_steps,1]
+            l3m = prop_marg_params[self.num_steps,2]
+            
+            ps = np.array([1./3., 1./3., 1./3.], dtype=np.float32)
 
-        if t == 0:
-            mu1 = mu1t
-            mu2 = mu2t
-            mu3 = mu3t
-            # mu4 = mu4t
-            # mu1 = lm1_prior_mean[0,0]
-            # mu2 = lm2_prior_mean[0,0]
-            # mu3 = lm3_prior_mean[0,0]
-        if t > 0:
-            transition = tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
-            mu1 = mu1t + transition
-            mu2 = mu2t + transition
-            mu3 = mu3t + transition
+            if t == 0:
+                mu1 = mu1t
+                mu2 = mu2t
+                mu3 = mu3t
+                x_scale = np.sqrt(init_var)
 
-        # if t > 0:
-        #     mu = mut + tf.transpose(self.transition_model(tf.transpose(x_prev)))*lint
-        # else:
-        #     mu = mut + lint*tf.transpose(init_pose)
+            else:
+                transition = (self.transition_model((x_prev[:,0]).T)).T
+                mu1 = mu1t + transition
+                mu2 = mu2t + transition
+                mu3 = mu3t + transition
+                
+                mu1 = mu1[:,0]
+                mu2 = mu2[:,0]
+                mu3 = mu3[:,0]
 
-        # Copula params are defined over the reals, but we want a correlation matrix
-        # So we use a sigmoid map to take reals to the range [-1,1]
-        # r_vec = (1. - tf.exp(-prop_copula_params[t,:]))/(1. + tf.exp(-prop_copula_params[t,:])) # should be length
-        r_vec = prop_copula_params[t,:]
-        L_mat = cc.CorrelationCholesky().forward(r_vec)
-        print("L Mat shape: ", L_mat.get_shape().as_list())
+                x_scale = np.sqrt(motion_var)
 
-        # Marginal bijectors will be the CDFs of the univariate marginals Here
-        # these are normal CDFs
-        # x_cdf = cg.GaussianMixtureCDF(ps=[1./3., 1./3., 1./3.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
-        # x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1], scales=[tf.sqrt(motion_var)])
-        # x_cdf = cg.EmpGaussianMixtureCDF()
-        # x_scale = tf.sqrt(motion_var)
-        # x_scale = tf.sqrt(tf.exp(logs2t))
-        if t == 0:
-            # x_scale = tf.sqrt(4.0*meas_var)
-            x_scale = tf.sqrt(init_var)
-        if t > 0:
-            x_scale = tf.sqrt(motion_var)
-        # print("mu1 shape: ", mu1.get_shape().as_list())
-        # print("mu2 shape: ", mu2.get_shape().as_list())
-        # print("mu3 shape: ", mu3.get_shape().as_list())
-        # ps = tf.transpose(tf.constant([[1./3.], [1./3.], [1./3.]]))
-        if t == 0:
-            ps = [1./3., 1./3., 1./3.]
-        if t > 0:
-            ps = tf.constant([1./3., 1./3., 1./3.])*tf.ones_like(mu1)
-            mu1 = mu1[:,0]
-            mu2 = mu2[:,0]
-            mu3 = mu3[:,0]
-        print("P vector: ", t, ps)
-        # print("mu1 vector", mu1[:,0])
-        # ps = [0.25, 0.25, 0.25, 0.25]
-        # ps = [1.0]
-        x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
-                                         locs=[mu1, mu2, mu3],
-                                         scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0]])
+            r_vec = prop_copula_params[t,:]
+            L_mat = cc.CorrelationCholesky().forward(r_vec)
+            x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
+                                             locs=[mu1, mu2, mu3],
+                                             scales=[x_scale[0,0],
+                                                     x_scale[0,0],
+                                                     x_scale[0,0]])
 
-        # x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
-        #                                  locs=[mu1, mu2, mu3, mu4],
-        #                                  scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0], x_scale[0,0]])
+            l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
+            l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
+            l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
 
+            # Build a copula (can also store globally if we want) we would just
+            #  have to modify self.copula.scale_tril and
+            #  self.copula.marginal_bijectors in each iteration NOTE: I add
+            #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
+            gc = cg.WarpedGaussianCopula(
+                loc=[0., 0., 0., 0.],
+                scale_tril=L_mat,
+                marginal_bijectors=[x_cdf, l1_cdf, l2_cdf, l3_cdf])
 
-        # x_cdf = cg.NormalCDF(loc=mu1, scale=x_scale)
-        l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
-        l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
-        l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
-
-        # Build a copula (can also store globally if we want) we would just
-        #  have to modify self.copula.scale_tril and
-        #  self.copula.marginal_bijectors in each iteration NOTE: I add
-        #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
-        gc = cg.WarpedGaussianCopula(
-            loc=[0., 0., 0., 0.],
-            scale_tril=L_mat,
-            marginal_bijectors=[
-                x_cdf,
-                l1_cdf,
-                l2_cdf,
-                l3_cdf])
-        # self.copula_s._bijector = cg.Concat([x1_cdf, x2_cdf, x3_cdf])
-        # self.copula_s.distribution.scale_tril = L_mat
-
-        # sample = self.copula_s.sample(x_prev.get_shape().as_list()[0])
-        return gc.sample(x_prev.get_shape().as_list()[0])
+            return gc.sample(x_prev.get_shape().as_list()[0])
 
     def log_proposal(self,t,x_curr,x_prev,observ,proposal_params):
         """
@@ -255,8 +193,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         mu1t = prop_marg_params[t,0]
         mu2t = prop_marg_params[t,1]
         mu3t = prop_marg_params[t,2]
-        # mu4t = prop_marg_params[t,3]
-        # logs2t = prop_marg_params[t,3]
+
         l1m = prop_marg_params[T,0]
         l2m = prop_marg_params[T,1]
         l3m = prop_marg_params[T,2]
@@ -304,31 +241,14 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             mu1 = mu1[:,0]
             mu2 = mu2[:,0]
             mu3 = mu3[:,0]
-        print("P vector: ", t, ps)
-        # print("mu1 vector", mu1[:,0])
-        # ps = [0.25, 0.25, 0.25, 0.25]
-        # ps = [1.0]
+
         x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
                                          locs=[mu1, mu2, mu3],
                                          scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0]])
 
-        # x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
-        #                                  locs=[mu1, mu2, mu3, mu4],
-        #                                  scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0], x_scale[0,0]])
-
-        # x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
-        #                                  locs=[mu1,mu2,mu3],
-        #                                  scales=[x_scale, x_scale, x_scale])
-
-        # x_cdf = cg.NormalCDF(loc=mu1, scale=x_scale)
         l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
         l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
         l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
-
-        # x_cdf = cg.NormalCDF(loc=mu1, scale=tf.sqrt(motion_var))
-        # l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
-        # l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
-        # l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
@@ -343,11 +263,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                 l2_cdf,
                 l3_cdf])
 
-        print("log proposal x_curr shape: ", x_curr.get_shape().as_list())
         return gc.log_prob(x_curr)
 
     def log_normal(self, x, mu, Sigma):
-        dim = Sigma.get_shape().as_list()[0]
+        dim = np.shape(Sigma)[0]
         sign, logdet = tf.linalg.slogdet(Sigma)
         log_norm = -0.5*dim*np.log(2.*np.pi) - 0.5*logdet
         Prec = tf.dtypes.cast(tf.linalg.inv(Sigma), dtype=tf.float32)
@@ -358,7 +277,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
     def log_target(self, t, x_curr, x_prev, observ):
         init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
-        print("X curr shape: ", x_curr.get_shape().as_list())
         x_prev_samples = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[0]]))
         x_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[0]]))
         l1_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[1]]))
@@ -416,17 +334,18 @@ if __name__ == '__main__':
 
 
     # True target parameters
-    lm1_prior_mean = tf.zeros([1,1],dtype=tf.float32)
-    lm1_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
-    lm2_prior_mean = 2.0*tf.ones([1,1],dtype=tf.float32)
-    lm2_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
-    lm3_prior_mean = 6.0*tf.ones([1,1],dtype=tf.float32)
-    lm3_prior_var = 0.01*tf.ones([1,1],dtype=tf.float32)
-    motion_mean = 2.0*tf.ones([1,1],dtype=tf.float32)
-    motion_var = 0.1*tf.ones([1,1],dtype=tf.float32)
-    meas_var = 0.1*tf.ones([1,1],dtype=tf.float32)
-    init_mean = tf.zeros([1,1],dtype=tf.float32)
-    init_var = 5.0*meas_var
+    # True target parameters
+    lm1_prior_mean = np.array([[0.]], dtype=np.float32)
+    lm1_prior_var = np.array([[0.01]], dtype=np.float32)
+    lm2_prior_mean = np.array([[2.0]], dtype=np.float32)
+    lm2_prior_var = np.array([[0.01]], dtype=np.float32)
+    lm3_prior_mean = np.array([[6.0]], dtype=np.float32)
+    lm3_prior_var = np.array([[0.01]], dtype=np.float32)
+    motion_mean = np.array([[2.0]], dtype=np.float32)
+    motion_var = np.array([[0.1]], dtype=np.float32)
+    meas_var = np.array([[0.1]], dtype=np.float32)
+    init_mean = np.array([[0.]], dtype=np.float32)
+    init_var = np.array([[5.]], dtype=np.float32)
     target_params = [init_mean, init_var,
                      lm1_prior_mean, lm1_prior_var,
                      lm2_prior_mean, lm2_prior_var,
@@ -453,8 +372,9 @@ if __name__ == '__main__':
 
     all_kls = []
     for seed in range(num_seeds):
+        start = time.time()
+        tf.reset_default_graph()
         config = tf.ConfigProto()
-
         config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
         sess = tf.Session(config=config)
@@ -481,32 +401,22 @@ if __name__ == '__main__':
         print("Optimal dep params: ", opt_dep_params)
 
         # Sample the model
-        my_vars = vcs.sim_q(opt_proposal_params, target_params, zt_vals, td_agent, num_samples=num_samps, num_particles=num_query_particles)
+        my_vars, map_traj = vcs.sim_q(opt_proposal_params,
+                                      target_params,
+                                      zt_vals,
+                                      td_agent,
+                                      num_samples=num_samps)
 
         my_samples = sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
-        print(samples_np.shape)
 
-        pose_plot = sbs.distplot(samples_np[:,0], color='purple', norm_hist=True, kde_kws={'bw': 'scott'})
-        sbs.distplot(samples_np[:,1], color='red', kde_kws={'bw': 'scott'})
-        sbs.distplot(samples_np[:,2], color='green', kde_kws={'bw': 'scott'})
-        sbs.distplot(samples_np[:,3], color='blue', kde_kws={'bw': 'scott'})
+        # Print elapsed time for the trial
+        end = time.time()
+        graph_vars = [n.name for n in tf.get_default_graph().as_graph_def().node]
 
-        plt.show()
+        print("Trial #{}: Elapsed time {}, Graph nodes {}".format(seed,
+                                                                  end - start,
+                                                                  len(graph_vars)))
 
 
-        true_scale = tf.sqrt(meas_var + lm1_prior_var).eval(session=sess)
-        xs, ps = pose_plot.get_lines()[0].get_data()
-        qs = (1./3.)*sps.norm.pdf(xs, loc=0.0, scale=true_scale) + \
-             (1./3.)*sps.norm.pdf(xs, loc=2.0, scale=true_scale) + \
-             (1./3.)*sps.norm.pdf(xs, loc=6.0, scale=true_scale)
-        plt.plot(xs, ps)
-        plt.plot(xs, qs.ravel(), color="red")
-        plt.show()
-        approx_kl = metrics.kld(qs, ps, support=(np.max(xs) - np.min(xs)))
-        approx_kl = sess.run([approx_kl])
-        print("Approx KL: ", approx_kl)
-        all_kls.append(approx_kl)
-    print("Avg KL: ", np.mean(all_kls))
-    print("KL std: ", np.std(all_kls))
 

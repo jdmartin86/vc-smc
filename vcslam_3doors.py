@@ -8,6 +8,8 @@ import tensorflow_probability as tfp
 import correlation_cholesky as cc
 from scipy.special import comb
 import scipy.stats as sps
+import math
+import csv
 
 from vcsmc import *
 import vcslam_agent
@@ -324,7 +326,7 @@ if __name__ == '__main__':
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 10
+    num_seeds = 2
     # Number of samples to use for plotting
     num_samps = 2000
     # Proposal initial scale
@@ -370,6 +372,26 @@ if __name__ == '__main__':
     # xt_vals, zt_vals = sess.run([x_true, z_true])
     zt_vals = None
 
+    truth = np.array([[0, 0, 2, 4],
+                      [2, 0, 2, 6],
+                      [4, 0, 2, 6]], np.int64)
+    np.savetxt('output/trajectory_ref.txt', truth, delimiter=',')
+
+    error_1 = []
+    mean_1 = []
+    std_1 = []
+    confidence_1 = []
+
+    error_2 = []
+    mean_2 = []
+    std_2 = []
+    confidence_2 = []
+
+    error_3 = []
+    mean_3 = []
+    std_3 = []
+    confidence_3 = []
+
     all_kls = []
     for seed in range(num_seeds):
         start = time.time()
@@ -406,9 +428,41 @@ if __name__ == '__main__':
                                       zt_vals,
                                       td_agent,
                                       num_samples=num_samps)
-
+        print(my_vars)
         my_samples = sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
+        print(samples_np)
+
+        trajectory_mean = np.mean(samples_np, 0)
+        trajectory_std = np.std(samples_np, 0)
+        sq_errors = []
+        conf_interval = []
+        for i in range(4):
+            #compute the mean squared error
+            er_sq = (truth[num_steps-1,i]-trajectory_mean[i])**2
+            sq_errors = np.append(sq_errors, er_sq)
+
+            #compute the lower and upper bounds at 95% confidence interval
+            lower_bound = trajectory_mean[i]-abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
+            upper_bound = trajectory_mean[i]+abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
+            conf_interval = np.append(conf_interval, [lower_bound, upper_bound])
+
+        #save data based on how many steps
+        if num_steps == 1:
+            error_1 = np.r_[error_1, sq_errors]
+            mean_1 = np.r_[mean_1, trajectory_mean]
+            std_1 = np.r_[std_1, trajectory_std]
+            confidence_1 = np.r_[confidence_1, conf_interval]
+        elif num_steps == 2:
+            error_2 = np.r_[error_2, sq_errors]
+            mean_2 = np.r_[mean_2, trajectory_mean]
+            std_2 = np.r_[std_2, trajectory_std]
+            confidence_2 = np.r_[confidence_2, conf_interval]
+        elif num_steps == 3:
+            error_3 = np.r_[error_3, sq_errors]
+            mean_3 = np.r_[mean_3, trajectory_mean]
+            std_3 = np.r_[std_3, trajectory_std]
+            confidence_3 = np.r_[confidence_3, conf_interval]
 
         # Print elapsed time for the trial
         end = time.time()
@@ -417,6 +471,81 @@ if __name__ == '__main__':
         print("Trial #{}: Elapsed time {}, Graph nodes {}".format(seed,
                                                                   end - start,
                                                                   len(graph_vars)))
-
+    #save the data
+    if num_steps == 1:
+        with open('output/VCSLAM_MSE_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(error_1[j:j+4])
+        with open('output/VCSLAMmean_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(mean_1[j:j+4])
+        with open('output/VCSLAMstd_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(std_1[j:j+4])
+        with open('output/VCSLAMconfidence_1.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
+            for i in range(num_seeds):
+                j = i*8
+                file_writer.writerow(confidence_1[j:j+8])
+    elif num_steps == 2:
+        with open('output/VCSLAM_MSE_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(error_2[j:j+4])
+        with open('output/VCSLAMmean_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(mean_2[j:j+4])
+        with open('output/VCSLAMstd_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(std_2[j:j+4])
+        with open('output/VCSLAMconfidence_2.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
+            for i in range(num_seeds):
+                j = i*8
+                file_writer.writerow(confidence_2[j:j+8])
+    elif num_steps == 3:
+        with open('output/VCSLAM_MSE_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(error_3[j:j+4])
+        with open('output/VCSLAMmean_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(mean_3[j:j+4])
+        with open('output/VCSLAMstd_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
+            for i in range(num_seeds):
+                j = i*4
+                file_writer.writerow(std_3[j:j+4])
+        with open('output/VCSLAMconfidence_3.csv', mode = 'w') as file:
+            file_writer = csv.writer(file, delimiter = ',')
+            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
+            for i in range(num_seeds):
+                j = i*8
+                file_writer.writerow(confidence_3[j:j+8])
 
 

@@ -153,8 +153,9 @@ class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
                 loc=[0., 0., 0., 0.],
                 scale_tril=np.eye(4, dtype=np.float32),
                 marginal_bijectors=[x_cdf, l1_cdf, l2_cdf, l3_cdf])
-
-            return gc.sample(np.shape(x_prev)[0])
+            sample = gc.sample(np.shape(x_prev)[0])
+            with tf.Session() as sess:
+                return sess.run(sample)
 
     def log_proposal(self,t,x_curr,x_prev,observ,proposal_params):
         """
@@ -257,7 +258,7 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 1
+    num_steps = 3
     # Number of particles to use during training
     num_train_particles = 100
     # Number of particles to use during SMC query
@@ -336,7 +337,6 @@ if __name__ == '__main__':
         start = time.time()
         tf.reset_default_graph()
         tf.set_random_seed(seed)
-        graph_vars = [n.name for n in tf.get_default_graph().as_graph_def().node]
 
         # Create the VCSLAM instance with above parameters
         with tf.Session() as sess:
@@ -349,7 +349,6 @@ if __name__ == '__main__':
                                           lr_d = lr_d,
                                           lr_m = lr_m,
                                           summary_writer = writer)
-        graph_vars = [n.name for n in tf.get_default_graph().as_graph_def().node]
         
         opt_dep_params = np.array(td_agent.init_dependency_params(), dtype=np.float32)
         opt_marg_params = np.array(td_agent.init_marg_params(), dtype=np.float32)

@@ -80,7 +80,7 @@ class VCSLAM():
         ancestors = tf.stop_gradient(
             resampling_dist.sample(sample_shape=(num_particles)))
         return ancestors
-
+    
     def sample_traj(self, log_weights, num_samples=1):
         """
         Draw index from the particle set
@@ -125,7 +125,7 @@ class VCSLAM():
             # Not doing adaptive resampling
             if t > 0:
                 ancestors = self.resampling(logw_tilde)
-                x_prev = tf.gather(x_curr,ancestors,axis=0)
+                x_prev = x_curr[ancestors]
             else:
                 x_prev = x_curr
 
@@ -240,7 +240,7 @@ class VCSLAM():
       map_traj = self.get_map_traj(trajectories, logw_tilde)
       return chosen_trajs, map_traj
 
-    def train(self,vcs_agent):
+    def train(self,vcs_agent, verbose=False):
         """
         Creates the training operation
         """
@@ -275,7 +275,7 @@ class VCSLAM():
             # Top-level training loop
             # TODO: add logging for loss terms
             iter_display = 100
-            print("    Iter    |    ELBO    ")
+            #print("    Iter    |    ELBO    ")
             # Expectation Maximization loop
             for i in range(self.num_train_steps):
 
@@ -300,7 +300,7 @@ class VCSLAM():
                     # mar_losses[it] = loss_curr
 
                 #self.summary_writer.add_summary(summary_str, it)
-                if i % iter_display == 0:
+                if verbose and i % iter_display == 0:
                     message = "{:15}|{!s:20}".format(i, -loss_curr)
                     print(message)
 

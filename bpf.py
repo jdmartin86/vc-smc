@@ -81,12 +81,13 @@ class BootstrapParticleFilter():
         # log unnormalized weights, we pass the weights in as logits, allowing
         # the distribution object to apply a softmax and normalize them.
         # log_weights = tf.gather(self.logw,t,axis=1)
-        if not num_particles:
-            num_particles = self.num_particles
+        num_particles = self.num_particles if num_particles is None else num_particles
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         ancestors = tf.stop_gradient(
             resampling_dist.sample(sample_shape=(num_particles)))
-        return ancestors
+        with tf.Session() as sess:
+            return sess.run(ancestors)
+        #return ancestors
 
     def sample_traj(self, log_weights, num_samples=1):
         """
@@ -112,8 +113,8 @@ class BootstrapParticleFilter():
 
         """
         # Initialize SMC
-        x_curr = np.zeros((self.num_particles,self.latent_dim), dtype=np.float32)
-        x_prev = np.zeros((self.num_particles,self.latent_dim), dtype=np.float32)
+        x_curr = np.zeros((self.num_particles, self.latent_dim), dtype=np.float32)
+        x_prev = np.zeros((self.num_particles, self.latent_dim), dtype=np.float32)
 
         # Unnormalized particle weights
         logw_tilde = np.zeros((self.num_particles), dtype=np.float32)
@@ -123,8 +124,6 @@ class BootstrapParticleFilter():
         # TODO: implement after testing regular resampling (04/22)
         #w      = tf.nn.softmax(logits=logW)
         #ESS = 1./np.sum(W**2)/N
-
-        # start_smc = timeit.default_timer()
         for t in range(self.num_steps):
             # Resampling
             # Shape of x_prev (num_particles,latent_dim)
@@ -177,29 +176,27 @@ class BootstrapParticleFilter():
                                num_particles,
                                self.latent_dim),
                               dtype=np.float32)
-            x_prev = np.zeros((num_particles,self.latent_dim),
+            x_prev = np.zeros((num_particles, self.latent_dim),
                               dtype=np.float32,)
 
             # Unnormalized particle weights
             logw_tilde =np.zeros(num_particles, dtype=np.float32)
             logZ = 0.
 
-            X = np.zeros((self.num_steps,
-                          num_particles,
-                          self.latent_dim),
+            X = np.zeros((self.num_steps, num_particles, self.latent_dim),
                          dtype=np.float32)
 
             # For effective sample size (ESS) calculations
             # TODO: implement after testing regular resampling (04/22)
             #w      = tf.nn.softmax(logits=logW)
             #ESS = 1./np.sum(W**2)/N
-
+            import ipdb; ipdb.set_trace()
             for t in range(self.num_steps):
                 # Resampling
                 # Shape of x_prev (num_particles,latent_dim)
                 if t > 0:
                     ancestors = self.resampling(logw_tilde, num_particles)
-                    x_prev = tf.gather(x_curr, ancestors, axis=0) #TODO: this indexing won't work - just for prototyping
+                    x_prev = x_curr[ancestors]#tf.gather(x_curr, ancestors, axis=0) #TODO: this indexing won't work - just for prototyping
                 else:
                     x_prev = x_curr[0,:,:]
 
@@ -249,10 +246,10 @@ class BootstrapParticleFilter():
                                                 shape=vcs_agent.get_marginal_param_shape(),
                                                 initializer=marginal_initializer)
             #print("Marginal params shape", marginal_params.shape)
-            proposal_params = [dependency_params,marginal_params]
+            proposal_params = [dependency_params, marginal_params]
 
             # Compute losses and define the learning procedures
-            loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
+            loss = -self.vsmc_lower_bound(vcs_agent, proposal_params)
             loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(-loss))
             summary_op = tf.summary.merge_all()
 

@@ -284,7 +284,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         l1_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[1]]))
         l2_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[2]]))
         l3_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[3]]))
-        print("x sample shape: ", x_samples.get_shape().as_list())
+
         logF = 0.0
         logG = 0.0
         if t > 0:
@@ -334,8 +334,6 @@ if __name__ == '__main__':
     # Copula initial scale
     cop_scale = 0.1
 
-
-    # True target parameters
     # True target parameters
     lm1_prior_mean = np.array([[0.]], dtype=np.float32)
     lm1_prior_var = np.array([[0.01]], dtype=np.float32)
@@ -354,14 +352,6 @@ if __name__ == '__main__':
                      lm3_prior_mean, lm3_prior_var,
                      motion_mean, motion_var,
                      meas_var]
-
-    # Create the session
-
-    config = tf.ConfigProto()
-
-    config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
-
-    sess = tf.Session(config=config)
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
@@ -396,31 +386,25 @@ if __name__ == '__main__':
     for seed in range(num_seeds):
         start = time.time()
         tf.reset_default_graph()
-        config = tf.ConfigProto()
-        config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
-
-        sess = tf.Session(config=config)
         tf.set_random_seed(seed)
 
         # Summary writer
-        writer = tf.summary.FileWriter('./logs', sess.graph)
+        with tf.Session() as sess:
+            writer = tf.summary.FileWriter('./logs', sess.graph)
+            vcs = VCSLAM(sess = sess,
+                         vcs_agent = td_agent,
+                         observ = zt_vals,
+                         num_particles = num_train_particles,
+                         num_train_steps = num_train_steps,
+                         lr_d = lr_d,
+                         lr_m = lr_m,
+                         summary_writer = writer)
 
-        # Create the VCSLAM instance with above parameters
-        vcs = VCSLAM(sess = sess,
-                     vcs_agent = td_agent,
-                     observ = zt_vals,
-                     num_particles = num_train_particles,
-                     num_train_steps = num_train_steps,
-                     lr_d = lr_d,
-                     lr_m = lr_m,
-                     summary_writer = writer)
-
-        # Train the model
-        opt_proposal_params = vcs.train(vcs_agent = td_agent)
-        opt_proposal_params = sess.run(opt_proposal_params)
-        opt_dep_params, opt_marg_params = opt_proposal_params
-        print(opt_proposal_params)
-        print("Optimal dep params: ", opt_dep_params)
+            # Train the model
+            opt_proposal_params = vcs.train(vcs_agent = td_agent)
+            opt_proposal_params = sess.run(opt_proposal_params)
+            opt_dep_params, opt_marg_params = opt_proposal_params
+            print("Optimal dep params: ", opt_dep_params)
 
         # Sample the model
         my_vars, map_traj = vcs.sim_q(opt_proposal_params,
@@ -428,8 +412,8 @@ if __name__ == '__main__':
                                       zt_vals,
                                       td_agent,
                                       num_samples=num_samps)
-        print(my_vars)
-        my_samples = sess.run(my_vars)
+        with tf.Session() as sess:
+            my_samples = sess.run(my_vars)
         samples_np = np.squeeze(np.array(my_samples))
         print(samples_np)
 

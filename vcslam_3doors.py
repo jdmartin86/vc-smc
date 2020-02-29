@@ -50,10 +50,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         # Landmark dimensionality (x)
         self.landmark_dim = landmark_dim
         # Latent variable dimensionality
-        # if not latent_dim:
-        #     self.latent_dim = self.num_steps * (self.state_dim + self.landmark_dim*self.num_landmarks)
-        # else:
-        #     self.latent_dim = latent_dim
         self.latent_dim = (self.state_dim + self.landmark_dim*self.num_landmarks)
         # A copula over N variables has (N choose 2) correlation parameters
         self.copula_dim = int(comb(self.latent_dim,2))
@@ -65,15 +61,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         # Random state for sampling
         self.rs = rs
-
-        # initialize dependency models
-        # self.copula_s = cg.WarpedGaussianCopula(
-        #     loc = tf.zeros(shape=self.state_dim, dtype=tf.float32),
-        #     scale_tril = tf.eye(self.state_dim, dtype=tf.float32),
-        #     marginal_bijectors=[
-        #         cg.NormalCDF(loc=0., scale=1.),
-        #         cg.NormalCDF(loc=0., scale=1.),
-        #         cg.NormalCDF(loc=0., scale=1.)])
 
     def transition_model(self, x):
         return x + self.target_params[8]
@@ -116,13 +103,13 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             prop_copula_params = proposal_params[0]
             prop_marg_params = proposal_params[1]
             
-            mu1t = prop_marg_params[t,0]
-            mu2t = prop_marg_params[t,1]
-            mu3t = prop_marg_params[t,2]
+            mu1t = prop_marg_params[t, 0]
+            mu2t = prop_marg_params[t, 1]
+            mu3t = prop_marg_params[t, 2]
 
-            l1m = prop_marg_params[self.num_steps,0]
-            l2m = prop_marg_params[self.num_steps,1]
-            l3m = prop_marg_params[self.num_steps,2]
+            l1m = prop_marg_params[self.num_steps, 0]
+            l2m = prop_marg_params[self.num_steps, 1]
+            l3m = prop_marg_params[self.num_steps, 2]
             
             ps = np.array([1./3., 1./3., 1./3.], dtype=np.float32)
 
@@ -130,7 +117,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                 mu1 = mu1t
                 mu2 = mu2t
                 mu3 = mu3t
-                x_scale = float(np.squeeze(np.sqrt(init_var)))
+                x_scale = np.float32(np.squeeze(np.sqrt(init_var)))
             else:
                 transition = tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
                 mu1 = mu1t + transition
@@ -172,8 +159,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         """
         prop_copula_params, prop_marg_params = proposal_params
 
-        # Extract params here
-        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        init_mean, init_var, lm1_prior_mean, \
+        lm1_prior_var, lm2_prior_mean, lm2_prior_var, \
+        lm3_prior_mean, lm3_prior_var, motion_mean, \
+        motion_var, meas_var = self.target_params
 
         T = self.num_steps
         num_particles = x_prev.get_shape().as_list()[0]
@@ -192,10 +181,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             mu1 = mu1t
             mu2 = mu2t
             mu3 = mu3t
-            # mu4 = mu4t
-            # mu1 = lm1_prior_mean[0,0]
-            # mu2 = lm2_prior_mean[0,0]
-            # mu3 = lm3_prior_mean[0,0]
         if t > 0:
             mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
             mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
@@ -302,19 +287,17 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 2 # Must be greater than 1
+    num_steps = 3 # Must be greater than 1
     # Number of particles to use during training
     num_train_particles = 100
-    # Number of particles to use during SMC query
-    num_query_particles = 2000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 5000
+    num_train_steps = 1000
     # Learning rate for the marginal
     lr_m = 0.1
     # Learning rate for the copula
-    lr_d = 0.001
+    lr_d = 0.1
     # Number of random seeds for experimental trials
-    num_seeds = 100
+    num_seeds = 10
     # Number of samples to use for plotting
     num_samps = 2000
     # Proposal initial scale
@@ -343,7 +326,11 @@ if __name__ == '__main__':
 
     # Create the agent
     rs = np.random.RandomState(1)# This remains fixed for the ground truth
-    td_agent = ThreeDoorsAgent(target_params=target_params, rs=rs, num_steps=num_steps, prop_scale=prop_scale, cop_scale=cop_scale)
+    td_agent = ThreeDoorsAgent(target_params=target_params,
+                               rs=rs,
+                               num_steps=num_steps,
+                               prop_scale=prop_scale,
+                               cop_scale=cop_scale)
 
     # Generate observations TODO: change to numpy implementation
     # x_true, z_true = td_agent.generate_data()
@@ -355,15 +342,13 @@ if __name__ == '__main__':
                       [4, 0, 2, 6]], np.int64)
     np.savetxt('output/trajectory_ref.txt', truth, delimiter=',')
 
-    trial_errors = []
-    trial_means = []
-    trial_particles = []
+    trial_mean_errors = []; trial_map_errors = []; trial_means = []
+    trial_dep_loss = []; trial_marg_loss = []
     for seed in range(num_seeds):
         start = time.time()
         tf.reset_default_graph()
         tf.set_random_seed(seed)
 
-        # Summary writer
         with tf.Session() as sess:
             writer = tf.summary.FileWriter('./logs', sess.graph)
             vcs = VCSLAM(sess = sess,
@@ -376,28 +361,32 @@ if __name__ == '__main__':
                          summary_writer = writer)
 
             # Train the model
-            opt_proposal_params = vcs.train(vcs_agent = td_agent)
-            opt_proposal_params = sess.run(opt_proposal_params)
-            opt_dep_params, opt_marg_params = opt_proposal_params
+            est_proposal_params, dep_loss, marg_loss = vcs.train(vcs_agent = td_agent)
+            est_proposal_params = sess.run(est_proposal_params)
+            est_dep_params, est_marg_params = est_proposal_params
+
+            print("Initial marg params: {}".format(td_agent.init_marg_params().flatten()))
+            print("Estimated marg params: {}".format(est_marg_params.flatten()))
+            print("Initial dep params: {}".format(td_agent.init_dependency_params().flatten()))
+            print("Estimated dep params: {}".format(est_dep_params.flatten()))
 
             # Sample the model
-            particles, map_traj = vcs.sim_q(opt_proposal_params,
+            particles, map_traj = vcs.sim_q(est_proposal_params,
                                             target_params,
                                             zt_vals,
                                             td_agent,
-                                            num_samples=num_samps)
-            particles = sess.run(particles)
+                                            num_samples=num_train_particles)
+            particles, map_traj = sess.run([particles, map_traj])
         particles = np.squeeze(np.array(particles))
-        print('Estimated trajectory samples: {}'.format(particles))
+        #print('Estimated trajectory samples: {}'.format(particles[-1,:]))
 
         # record trial data
-        trajectory_mean = np.mean(particles[-1,:,:], 0)
-        sq_errors = []
-        for i in range(4):
-            sq_errors.append((truth[num_steps-1,i]-trajectory_mean[i])**2)
-            
-        trial_errors.append(np.array(sq_errors))
-        trial_means.append(trajectory_mean)
+        mean_traj = np.mean(particles[-1,:,:], 0)
+        trial_mean_errors.append(np.sqrt((truth[num_steps-1,:] - mean_traj)**2))
+        trial_map_errors.append(np.sqrt((truth[num_steps-1,:] - map_traj[-1,:])**2))
+        trial_means.append(mean_traj)
+        trial_dep_loss.append(np.array(dep_loss))
+        trial_marg_loss.append(np.array(marg_loss))
             
         # Print elapsed time for the trial
         end = time.time()
@@ -406,7 +395,10 @@ if __name__ == '__main__':
                                                                   end - start,
                                                                   len(graph_vars)))
         #save the data
-        np.savetxt('output/vcsmc_mse_{}_{}.csv'.format(num_steps,seed), trial_errors, delimiter=',')
+        np.savetxt('output/vcsmc_rmse_mean_{}_{}.csv'.format(num_steps,seed), trial_mean_errors, delimiter=',')
+        np.savetxt('output/vcsmc_rmse_map_{}_{}.csv'.format(num_steps,seed), trial_map_errors, delimiter=',')
         np.savetxt('output/vcsmc_mean_{}_{}.csv'.format(num_steps,seed), trial_means, delimiter=',')
+        np.savetxt('output/vcsmc_dep_loss_{}_{}.csv'.format(num_steps,seed), trial_dep_loss, delimiter=',')
+   np.savetxt('output/vcsmc_marg_loss_{}_{}.csv'.format(num_steps,seed), trial_marg_loss, delimiter=',')
 
 

@@ -177,13 +177,12 @@ class VCSLAM():
 
       return tf.gather_nd(trajectories, indices)
 
-
     def sim_q(self,
               prop_params,
               model_params,
               y,
               vcs_obj,
-              num_samples = 1):
+              num_samples=1):
       """
       Simulates a single sample from the VSMC approximation.
       This returns the SLAM solution
@@ -297,9 +296,7 @@ class VCSLAM():
 
                 #self.summary_writer.add_summary(summary_str, it)
                 if verbose and i % iter_display == 0:
-                    message = "{:15}|{!s:20}".format(i, -loss_curr)
+                    message = "{:15}|{!s:20}".format(i, loss_curr)
                     print(message)
 
-        np.savetxt('output/dependency_loss.csv', dependency_loss, delimiter=',')
-        np.savetxt('output/marginal_loss.csv', marginal_loss, delimiter=',')
-        return proposal_params
+        return proposal_params, dependency_loss, marginal_loss

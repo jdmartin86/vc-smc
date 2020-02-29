@@ -85,8 +85,7 @@ class BootstrapParticleFilter():
         resampling_dist = tf.contrib.distributions.Categorical(logits=log_weights)
         ancestors = tf.stop_gradient(
             resampling_dist.sample(sample_shape=(num_particles)))
-        with tf.Session() as sess:
-            return sess.run(ancestors)
+        return ancestors
         #return ancestors
 
     def sample_traj(self, log_weights, num_samples=1):
@@ -158,107 +157,89 @@ class BootstrapParticleFilter():
             #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
         # print("Train SMC Time: ", (timeit.default_timer() - start_smc))
         return logZ
+    
+    def get_traj_samples(self, trajectories, logits, num_samples):
+      step_indices = tf.range(tf.to_int64(self.num_steps))[:, None]
+      traj_indices = self.sample_traj(logits, num_samples)
 
-    def sim_q(self, prop_params, model_params, y, vcs_obj, num_samples=1, num_particles=None):
-        """
-        Simulates a single sample from the VSMC approximation.
-        This returns the SLAM solution
-        This procedure is the same as the objective, but it saves the trajectory
-        """
+      step_indices_tiled = tf.tile(step_indices, [1, num_samples])
+      traj_indices_tiled = tf.tile(traj_indices[None,:], [self.num_steps, 1])
+      step_indices_tiled = tf.expand_dims(step_indices_tiled, 2)
+      traj_indices_tiled = tf.expand_dims(traj_indices_tiled, 2)
 
-        # Allow user to simulate q with more particles than we trained with
-        if not num_particles:
-            num_particles = self.num_particles
+      indices = tf.concat([step_indices_tiled, traj_indices_tiled], 2)
 
-        # Initialize SMC
-        with tf.variable_scope('sim_q', reuse=tf.AUTO_REUSE):
-            x_curr = np.zeros((self.num_steps,
-                               num_particles,
-                               self.latent_dim),
-                              dtype=np.float32)
-            x_prev = np.zeros((num_particles, self.latent_dim),
-                              dtype=np.float32,)
+      return tf.gather_nd(trajectories, indices)
 
-            # Unnormalized particle weights
-            logw_tilde =np.zeros(num_particles, dtype=np.float32)
-            logZ = 0.
+    def get_map_traj(self, trajectories, logits):
+      # Compute the index of highest probability trajectory.
+      dist = tf.contrib.distributions.Categorical(logits=logits)
+      traj_index = tf.expand_dims(tf.argmax(dist.probs), 0)
 
-            X = np.zeros((self.num_steps, num_particles, self.latent_dim),
-                         dtype=np.float32)
+      step_indices = tf.range(tf.to_int64(self.num_steps))[:, None]
+      traj_index_tiled = tf.tile(traj_index, [self.num_steps])[:, None]
+      indices = tf.concat([step_indices, traj_index_tiled], 1)
 
-            # For effective sample size (ESS) calculations
-            # TODO: implement after testing regular resampling (04/22)
-            #w      = tf.nn.softmax(logits=logW)
-            #ESS = 1./np.sum(W**2)/N
-            for t in range(self.num_steps):
-                # Resampling
-                # Shape of x_prev (num_particles,latent_dim)
-                if t > 0:
-                    ancestors = self.resampling(logw_tilde, num_particles)
-                    x_prev = x_curr[ancestors]#tf.gather(x_curr, ancestors, axis=0) #TODO: this indexing won't work - just for prototyping
-                else:
-                    x_prev = x_curr[0,:,:]
+      return tf.gather_nd(trajectories, indices)
 
-                # Propagation
-                # This simulates one transition from the proposal distribution
-                # Shape of x_curr (num_particles,latent_dim)
-                # TODO: Revisit the arguments when you implement the class with the proposal and couplas
-                x_curr = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
+    def sim_q(self,
+              prop_params,
+              model_params,
+              y,
+              vcs_obj,
+              num_samples=1):
+      """
+      Simulates a single sample from the VSMC approximation.
+      This returns the SLAM solution
+      This procedure is the same as the objective, but it saves the trajectory
+      """
+      # Initialize SMC
+      x_curr = tf.zeros([self.num_particles, self.latent_dim])
+      x_prev = tf.zeros([self.num_particles, self.latent_dim])
 
-                # Weighting
-                # Get the log weights for the current timestep
-                # Shape of logw_tilde (num_particles)
-                logw_tilde = vcs_obj.log_weights(t, x_curr, x_prev, self.observ, prop_params)
-                # print(logw_tilde)
-                max_logw_tilde = tf.math.reduce_max(logw_tilde)
-                logw_tilde_adj = logw_tilde - max_logw_tilde
-                logZ += tf.math.reduce_logsumexp(logw_tilde_adj) - tf.log(tf.to_float(num_particles)) + max_logw_tilde
+      # Unnormalized particle weights
+      logw_tilde = tf.zeros(self.num_particles)
 
-                # Not sure if this is correct at all - Kevin
-                W = tf.exp(logw_tilde_adj)
-                W /= tf.reduce_sum(W)
-                logW = tf.log(W)
+      # Effective sample size.
+      #w      = tf.nn.softmax(logits=logW)
+      #ESS = 1./np.sum(W**2)/N
 
-                #w = tf.nn.softmax(logits=logw_tilde_adj)
-                #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
+      trajectories = []
+      for t in range(self.num_steps):
+        # Append trajectory elements
+        trajectories.append(x_curr)
 
-            Bs = self.sample_traj(logw_tilde, num_samples)
-            return tf.gather(x_curr,Bs,axis=0)
+        # Resampling
+        # Shape of x_prev (num_particles,latent_dim)
+        if t > 0:
+          ancestors = self.resampling(logw_tilde, self.num_particles)
+          x_prev = tf.gather(x_curr,ancestors,axis=0)
+        else:
+          x_prev = x_curr
 
-    def train(self,vcs_agent):
-        """
-        Creates the top-level computation graph for training
-        This actually doesn't train anything for the bootstrap particle filter
-        It was simply made to mirror the syntax of vcsmc.py
-        """
-        dependency_initializer = tf.constant_initializer(vcs_agent.init_dependency_params())
-        marginal_initializer = tf.constant_initializer(vcs_agent.init_marg_params())
+        # Propagation
+        # This simulates one transition from the proposal distribution
+        # Shape of x_curr: num_particles x latent_dim
+        x_curr = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
+        
+        # Weighting
+        # Get the log weights for the current timestep
+        # Shape of logw_tilde (num_particles)
+        logw_tilde = vcs_obj.log_weights(t, x_curr, x_prev, self.observ,
+                                         prop_params)
 
-        # Initialize the parameters
-        with tf.variable_scope("vcsmc", reuse=tf.AUTO_REUSE):
-            dependency_params = tf.get_variable( "theta",
-                                                 dtype=tf.float32,
-                                                 shape=vcs_agent.get_dependency_param_shape(),
-                                                 initializer=dependency_initializer)
-            marginal_params   = tf.get_variable( "eta",
-                                                dtype=tf.float32,
-                                                shape=vcs_agent.get_marginal_param_shape(),
-                                                initializer=marginal_initializer)
-            #print("Marginal params shape", marginal_params.shape)
-            proposal_params = [dependency_params, marginal_params]
+        # Effective sample size.
+        # TODO enable after testing resample at each step
+        #max_logw_tilde = tf.math.reduce_max(logw_tilde)
+        #logw_tilde_adj = logw_tilde - max_logw_tilde
+        #w = tf.nn.softmax(logits=logw_tilde_adj)
+        #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
-            # Compute losses and define the learning procedures
-            loss = -self.vsmc_lower_bound(vcs_agent, proposal_params)
-            loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(-loss))
-            summary_op = tf.summary.merge_all()
+      # Stack trajectories into a tensor.
+      trajectories = tf.stack(trajectories)
 
-            # Start the session
-            self.sess.run(tf.global_variables_initializer())
-            #print("Original dep params:\n", dependency_params.eval(session=self.sess))
-            #print("Original marginal_params:\n", marginal_params.eval(session=self.sess))
+      # Return a batch of sampled trajectories and the MAP trajectory.
+      chosen_trajs = self.get_traj_samples(trajectories, logw_tilde, num_samples)
+      map_traj = self.get_map_traj(trajectories, logw_tilde)
+      return chosen_trajs, map_traj
 
-            # Run everything:
-            loss_curr = self.sess.run([loss])
-            print("ELBO: ", -loss_curr[0])
-
-        return proposal_params

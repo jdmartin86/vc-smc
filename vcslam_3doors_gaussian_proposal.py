@@ -232,7 +232,7 @@ class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
         logG = 0.0
         if t > 0:
             logF = self.log_normal(x_samples,
-                                   np.transpose(self.transition_model(np.transpose(x_prev_samples))), motion_var)
+                                   tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
         if t == 0 or t == 1:
             log_mixture_components = [tf.log(1./3.) + self.log_normal(x_samples, l1_samples, meas_var),
                                       tf.log(1./3.) + self.log_normal(x_samples, l2_samples, meas_var),
@@ -258,7 +258,7 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 3
+    num_steps = 2
     # Number of particles to use during training
     num_train_particles = 100
     # Number of particles to use during SMC query
@@ -270,7 +270,7 @@ if __name__ == '__main__':
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 50
+    num_seeds = 100
     # Number of samples to use for plotting
     num_samps = 2000
     # Proposal initial scale
@@ -317,21 +317,8 @@ if __name__ == '__main__':
 
     all_kls = []
 
-    error_1 = []
-    mean_1 = []
-    std_1 = []
-    confidence_1 = []
-
-    error_2 = []
-    mean_2 = []
-    std_2 = []
-    confidence_2 = []
-
-    error_3 = []
-    mean_3 = []
-    std_3 = []
-    confidence_3 = []
-
+    trial_errors = []
+    trial_means = []
     # Run experiment
     for seed in range(num_seeds):
         start = time.time()
@@ -369,121 +356,22 @@ if __name__ == '__main__':
         trajectory_mean = np.mean(samples_np, 0)
         trajectory_std = np.std(samples_np, 0)
         sq_errors = []
-        conf_interval = []
         for i in range(4):
-            #compute the mean squared error
-            er_sq = (truth[num_steps-1,i]-trajectory_mean[i])**2
-            sq_errors = np.append(sq_errors, er_sq)
-
-            #compute the lower and upper bounds at 95% confidence interval
-            lower_bound = trajectory_mean[i]-abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
-            upper_bound = trajectory_mean[i]+abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
-            conf_interval = np.append(conf_interval, [lower_bound, upper_bound])
+            sq_errors.append((truth[num_steps-1,i]-trajectory_mean[i])**2)
 
         #save data based on how many steps
-        if num_steps == 1:
-            error_1 = np.r_[error_1, sq_errors]
-            mean_1 = np.r_[mean_1, trajectory_mean]
-            std_1 = np.r_[std_1, trajectory_std]
-            confidence_1 = np.r_[confidence_1, conf_interval]
-        elif num_steps == 2:
-            error_2 = np.r_[error_2, sq_errors]
-            mean_2 = np.r_[mean_2, trajectory_mean]
-            std_2 = np.r_[std_2, trajectory_std]
-            confidence_2 = np.r_[confidence_2, conf_interval]
-        elif num_steps == 3:
-            error_3 = np.r_[error_3, sq_errors]
-            mean_3 = np.r_[mean_3, trajectory_mean]
-            std_3 = np.r_[std_3, trajectory_std]
-            confidence_3 = np.r_[confidence_3, conf_interval]
+        trial_errors.append(np.array(sq_errors))
+        trial_means.append(trajectory_mean)
 
+        np.savetxt('output/bpf_mse_{}_{}.csv'.format(num_steps, seed),  
         # Print elapsed time for the trial
         end = time.time()
         graph_vars = [n.name for n in tf.get_default_graph().as_graph_def().node]
-
         print("Trial #{}: Elapsed time {}, Graph nodes {}".format(seed,
                                                                   end - start,
                                                                   len(graph_vars)))
-
-        #approx_kl = metrics.kld(samples_np, ps, support=(np.max(xs) - np.min(xs)))
-        #approx_kl = sess.run([approx_kl])
-        #print("Approx KL: ", approx_kl)
-        #all_kls.append(approx_kl)
-    if num_steps == 1:
-        with open('output/BPFerror_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(error_1[j:j+4])
-        with open('output/BPFmean_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(mean_1[j:j+4])
-        with open('output/BPFstd_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(std_1[j:j+4])
-        with open('output/BPFconfidence_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
-            for i in range(num_seeds):
-                j = i*8
-                file_writer.writerow(confidence_1[j:j+8])
-    elif num_steps == 2:
-        with open('output/BPFerror_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(error_2[j:j+4])
-        with open('output/BPFmean_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(mean_2[j:j+4])
-        with open('output/BPFstd_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(std_2[j:j+4])
-        with open('output/BPFconfidence_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
-            for i in range(num_seeds):
-                j = i*8
-                file_writer.writerow(confidence_2[j:j+8])
-    elif num_steps == 3:
-        with open('output/BPFerror_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(error_3[j:j+4])
-        with open('output/BPFmean_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(mean_3[j:j+4])
-        with open('output/BPFstd_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(std_3[j:j+4])
-        with open('output/BPFconfidence_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
-            for i in range(num_seeds):
-                j = i*8
-                file_writer.writerow(confidence_3[j:j+8])
-    print("Avg KL: ", np.mean(all_kls))
+        #save the data
+        np.savetxt('output/vcsmc_mse_{}_{}.csv'.format(num_steps,seed), trial_errors, delimiter=',')
+        np.savetxt('output/vcsmc_mean_{}_{}.csv'.format(num_steps,seed), trial_means, delimiter=',')
 
 

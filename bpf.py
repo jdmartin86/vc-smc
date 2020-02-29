@@ -190,7 +190,6 @@ class BootstrapParticleFilter():
             # TODO: implement after testing regular resampling (04/22)
             #w      = tf.nn.softmax(logits=logW)
             #ESS = 1./np.sum(W**2)/N
-            import ipdb; ipdb.set_trace()
             for t in range(self.num_steps):
                 # Resampling
                 # Shape of x_prev (num_particles,latent_dim)

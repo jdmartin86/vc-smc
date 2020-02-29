@@ -125,7 +125,7 @@ class VCSLAM():
             # Not doing adaptive resampling
             if t > 0:
                 ancestors = self.resampling(logw_tilde)
-                x_prev = x_curr[ancestors]
+                x_prev = tf.gather(x_curr,ancestors,axis=0)
             else:
                 x_prev = x_curr
 
@@ -140,7 +140,6 @@ class VCSLAM():
             # Get the log weights for the current timestep
             # Shape of logw_tilde (num_particles)
             logw_tilde = vcs_agent.log_weights(t, x_curr, x_prev, self.observ, proposal_params)
-            logw_tilde = tf.debugging.check_numerics(logw_tilde, "Error, ahhh!!!")
             max_logw_tilde = tf.reduce_max(logw_tilde)
             logw_tilde_adj = logw_tilde - max_logw_tilde
 
@@ -218,7 +217,7 @@ class VCSLAM():
         # This simulates one transition from the proposal distribution
         # Shape of x_curr: num_particles x latent_dim
         x_curr = vcs_obj.sim_proposal(t, x_prev, self.observ, prop_params)
-
+        
         # Weighting
         # Get the log weights for the current timestep
         # Shape of logw_tilde (num_particles)
@@ -240,7 +239,7 @@ class VCSLAM():
       map_traj = self.get_map_traj(trajectories, logw_tilde)
       return chosen_trajs, map_traj
 
-    def train(self,vcs_agent, verbose=False):
+    def train(self,vcs_agent, verbose=True):
         """
         Creates the training operation
         """
@@ -259,15 +258,15 @@ class VCSLAM():
                                                 shape=vcs_agent.get_marginal_param_shape(),
                                                 initializer=marginal_initializer)
             #print("Marginal params shape", marginal_params.shape)
-            proposal_params = [dependency_params,marginal_params]
+            proposal_params = [dependency_params, marginal_params]
 
             # Compute losses and define the learning procedures
-            loss = -self.vsmc_lower_bound(vcs_agent,proposal_params)
-            loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(-loss))
-            summary_op = tf.summary.merge_all()
+            loss = -self.vsmc_lower_bound(vcs_agent, proposal_params)
+            #loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(loss))
+            #summary_op = tf.summary.merge_all()
 
             learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
-            learn_marginal   = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
+            learn_marginal = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)
 
             # Start the session
             self.sess.run(tf.global_variables_initializer())
@@ -275,33 +274,32 @@ class VCSLAM():
             # Top-level training loop
             # TODO: add logging for loss terms
             iter_display = 100
-            #print("    Iter    |    ELBO    ")
+            print("    Iter    |    ELBO    ")
             # Expectation Maximization loop
+            marginal_loss = []; dependency_loss = []
             for i in range(self.num_train_steps):
 
                 # Train the dependency model
                 for it in range(self.num_dependency_train_steps):
                     _, loss_curr = self.sess.run([learn_dependency, loss])
-
+                    dependency_loss.append(loss_curr)
                     if np.isnan(loss_curr):
                         print("NAN loss:", i, it)
                         return None
-
-                    # dep_losses[it] = loss_curr
 
                 # Train the marginal model
                 for it in range(self.num_marginal_train_steps):
-                    _, loss_curr, summary_str = self.sess.run([learn_marginal, loss, summary_op])
-
+                    _, loss_curr = self.sess.run([learn_marginal, loss])
+                    marginal_loss.append(loss_curr)
                     if np.isnan(loss_curr):
                         print("NAN loss:", i, it)
                         return None
-
-                    # mar_losses[it] = loss_curr
 
                 #self.summary_writer.add_summary(summary_str, it)
                 if verbose and i % iter_display == 0:
                     message = "{:15}|{!s:20}".format(i, -loss_curr)
                     print(message)
 
+        np.savetxt('output/dependency_loss.csv', dependency_loss, delimiter=',')
+        np.savetxt('output/marginal_loss.csv', marginal_loss, delimiter=',')
         return proposal_params

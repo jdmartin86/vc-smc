@@ -76,8 +76,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #         cg.NormalCDF(loc=0., scale=1.)])
 
     def transition_model(self, x):
-        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
-        return x + motion_mean
+        return x + self.target_params[8]
 
     def measurement_model(self, x):
         return 0.
@@ -89,30 +88,20 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return [self.num_steps+1, self.state_dim*3]
 
     def init_marg_params(self):
-        T = self.num_steps
-        Dx = self.state_dim
         """
         Marginal params for this problem are the means of the Gaussians at each
         time step (so 3 gaussians * T time steps) as well as the landmark
         location means (so num landmarks = 3) which we place at the T+1 time step
 
         """
-        # Random initialization of poses and landmarks
-        # marg_params = np.array([np.array([self.prop_scale * self.rs.randn(3*Dx)]).ravel() # 3 MoG means per time step
-        #                                   for t in range(T+1)])
-
         # Test initialization with prior landmark means
-        marg_params = np.vstack([np.array([np.array([self.prop_scale*self.rs.randn(3*Dx)]).ravel() for t in range(T)]),
+        marg_params = np.vstack([np.array([np.array([self.prop_scale*self.rs.randn(3*self.state_dim)]).ravel() for t in range(self.num_steps)]),
                                  np.array([0.0, 2.0, 6.0])])
-
         return marg_params
 
     def init_dependency_params(self):
-        # Copula model represents a joint dependency distribution
-        # over the latent variable components
-        T = self.num_steps
-        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.copula_dim)).ravel() # correlation params
-                                  for t in range(T)])
+        # Correlation params
+        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.copula_dim)).ravel() for t in range(self.num_steps)])
         return copula_params
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
@@ -123,10 +112,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             lm3_prior_mean, lm3_prior_var, motion_mean, \
             motion_var, meas_var = self.target_params
             
-            num_particles = np.shape(x_prev)[0]
+            num_particles = x_prev.get_shape().as_list()[0]
             prop_copula_params = proposal_params[0]
             prop_marg_params = proposal_params[1]
-
+            
             mu1t = prop_marg_params[t,0]
             mu2t = prop_marg_params[t,1]
             mu3t = prop_marg_params[t,2]
@@ -141,41 +130,40 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                 mu1 = mu1t
                 mu2 = mu2t
                 mu3 = mu3t
-                x_scale = np.sqrt(init_var)
-
+                x_scale = float(np.squeeze(np.sqrt(init_var)))
             else:
-                transition = (self.transition_model((x_prev[:,0]).T)).T
+                transition = tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
                 mu1 = mu1t + transition
                 mu2 = mu2t + transition
                 mu3 = mu3t + transition
-                
+
+                ps = np.repeat(ps[None,:], num_particles, axis=0)
+
                 mu1 = mu1[:,0]
                 mu2 = mu2[:,0]
                 mu3 = mu3[:,0]
 
-                x_scale = np.sqrt(motion_var)
+                x_scale = np.float32(np.squeeze(np.sqrt(motion_var)))
 
             r_vec = prop_copula_params[t,:]
             L_mat = cc.CorrelationCholesky().forward(r_vec)
+
+            # Defining the marginal CDFs 
             x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
                                              locs=[mu1, mu2, mu3],
-                                             scales=[x_scale[0,0],
-                                                     x_scale[0,0],
-                                                     x_scale[0,0]])
+                                             scales=[x_scale, x_scale, x_scale])
 
-            l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
-            l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
-            l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
+            l1_cdf = cg.NormalCDF(loc=l1m, scale=np.sqrt(np.float32(lm1_prior_var)))
+            l2_cdf = cg.NormalCDF(loc=l2m, scale=np.sqrt(np.float32(lm2_prior_var)))
+            l3_cdf = cg.NormalCDF(loc=l3m, scale=np.sqrt(np.float32(lm3_prior_var)))
 
-            # Build a copula (can also store globally if we want) we would just
-            #  have to modify self.copula.scale_tril and
-            #  self.copula.marginal_bijectors in each iteration NOTE: I add
-            #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
+            # Build a copula (can also store globally if we want)
+            #NOTE: I add tf.eye(3) to L_mat because I think the diagonal has to be > 0
             gc = cg.WarpedGaussianCopula(
                 loc=[0., 0., 0., 0.],
                 scale_tril=L_mat,
                 marginal_bijectors=[x_cdf, l1_cdf, l2_cdf, l3_cdf])
-
+            
             return gc.sample(x_prev.get_shape().as_list()[0])
 
     def log_proposal(self,t,x_curr,x_prev,observ,proposal_params):
@@ -314,19 +302,19 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 1
+    num_steps = 2 # Must be greater than 1
     # Number of particles to use during training
     num_train_particles = 100
     # Number of particles to use during SMC query
     num_query_particles = 2000
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 4000
+    num_train_steps = 5000
     # Learning rate for the marginal
     lr_m = 0.1
     # Learning rate for the copula
     lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 2
+    num_seeds = 100
     # Number of samples to use for plotting
     num_samps = 2000
     # Proposal initial scale
@@ -336,12 +324,12 @@ if __name__ == '__main__':
 
     # True target parameters
     lm1_prior_mean = np.array([[0.]], dtype=np.float32)
+    lm2_prior_mean = np.array([[2.]], dtype=np.float32)
+    lm3_prior_mean = np.array([[6.]], dtype=np.float32)
     lm1_prior_var = np.array([[0.01]], dtype=np.float32)
-    lm2_prior_mean = np.array([[2.0]], dtype=np.float32)
     lm2_prior_var = np.array([[0.01]], dtype=np.float32)
-    lm3_prior_mean = np.array([[6.0]], dtype=np.float32)
     lm3_prior_var = np.array([[0.01]], dtype=np.float32)
-    motion_mean = np.array([[2.0]], dtype=np.float32)
+    motion_mean = np.array([[2.]], dtype=np.float32)
     motion_var = np.array([[0.1]], dtype=np.float32)
     meas_var = np.array([[0.1]], dtype=np.float32)
     init_mean = np.array([[0.]], dtype=np.float32)
@@ -367,22 +355,9 @@ if __name__ == '__main__':
                       [4, 0, 2, 6]], np.int64)
     np.savetxt('output/trajectory_ref.txt', truth, delimiter=',')
 
-    error_1 = []
-    mean_1 = []
-    std_1 = []
-    confidence_1 = []
-
-    error_2 = []
-    mean_2 = []
-    std_2 = []
-    confidence_2 = []
-
-    error_3 = []
-    mean_3 = []
-    std_3 = []
-    confidence_3 = []
-
-    all_kls = []
+    trial_errors = []
+    trial_means = []
+    trial_particles = []
     for seed in range(num_seeds):
         start = time.time()
         tf.reset_default_graph()
@@ -404,132 +379,34 @@ if __name__ == '__main__':
             opt_proposal_params = vcs.train(vcs_agent = td_agent)
             opt_proposal_params = sess.run(opt_proposal_params)
             opt_dep_params, opt_marg_params = opt_proposal_params
-            print("Optimal dep params: ", opt_dep_params)
 
-        # Sample the model
-        my_vars, map_traj = vcs.sim_q(opt_proposal_params,
-                                      target_params,
-                                      zt_vals,
-                                      td_agent,
-                                      num_samples=num_samps)
-        with tf.Session() as sess:
-            my_samples = sess.run(my_vars)
-        samples_np = np.squeeze(np.array(my_samples))
-        print(samples_np)
+            # Sample the model
+            particles, map_traj = vcs.sim_q(opt_proposal_params,
+                                            target_params,
+                                            zt_vals,
+                                            td_agent,
+                                            num_samples=num_samps)
+            particles = sess.run(particles)
+        particles = np.squeeze(np.array(particles))
+        print('Estimated trajectory samples: {}'.format(particles))
 
-        trajectory_mean = np.mean(samples_np, 0)
-        trajectory_std = np.std(samples_np, 0)
+        # record trial data
+        trajectory_mean = np.mean(particles[-1,:,:], 0)
         sq_errors = []
-        conf_interval = []
         for i in range(4):
-            #compute the mean squared error
-            er_sq = (truth[num_steps-1,i]-trajectory_mean[i])**2
-            sq_errors = np.append(sq_errors, er_sq)
-
-            #compute the lower and upper bounds at 95% confidence interval
-            lower_bound = trajectory_mean[i]-abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
-            upper_bound = trajectory_mean[i]+abs(1.96*(trajectory_std[i]/math.sqrt(num_samps)))
-            conf_interval = np.append(conf_interval, [lower_bound, upper_bound])
-
-        #save data based on how many steps
-        if num_steps == 1:
-            error_1 = np.r_[error_1, sq_errors]
-            mean_1 = np.r_[mean_1, trajectory_mean]
-            std_1 = np.r_[std_1, trajectory_std]
-            confidence_1 = np.r_[confidence_1, conf_interval]
-        elif num_steps == 2:
-            error_2 = np.r_[error_2, sq_errors]
-            mean_2 = np.r_[mean_2, trajectory_mean]
-            std_2 = np.r_[std_2, trajectory_std]
-            confidence_2 = np.r_[confidence_2, conf_interval]
-        elif num_steps == 3:
-            error_3 = np.r_[error_3, sq_errors]
-            mean_3 = np.r_[mean_3, trajectory_mean]
-            std_3 = np.r_[std_3, trajectory_std]
-            confidence_3 = np.r_[confidence_3, conf_interval]
-
+            sq_errors.append((truth[num_steps-1,i]-trajectory_mean[i])**2)
+            
+        trial_errors.append(np.array(sq_errors))
+        trial_means.append(trajectory_mean)
+            
         # Print elapsed time for the trial
         end = time.time()
         graph_vars = [n.name for n in tf.get_default_graph().as_graph_def().node]
-
         print("Trial #{}: Elapsed time {}, Graph nodes {}".format(seed,
                                                                   end - start,
                                                                   len(graph_vars)))
-    #save the data
-    if num_steps == 1:
-        with open('output/VCSLAM_MSE_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(error_1[j:j+4])
-        with open('output/VCSLAMmean_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(mean_1[j:j+4])
-        with open('output/VCSLAMstd_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(std_1[j:j+4])
-        with open('output/VCSLAMconfidence_1.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
-            for i in range(num_seeds):
-                j = i*8
-                file_writer.writerow(confidence_1[j:j+8])
-    elif num_steps == 2:
-        with open('output/VCSLAM_MSE_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(error_2[j:j+4])
-        with open('output/VCSLAMmean_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(mean_2[j:j+4])
-        with open('output/VCSLAMstd_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(std_2[j:j+4])
-        with open('output/VCSLAMconfidence_2.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
-            for i in range(num_seeds):
-                j = i*8
-                file_writer.writerow(confidence_2[j:j+8])
-    elif num_steps == 3:
-        with open('output/VCSLAM_MSE_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(error_3[j:j+4])
-        with open('output/VCSLAMmean_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(mean_3[j:j+4])
-        with open('output/VCSLAMstd_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot', 'landmark 1', 'landmark 2', 'landmark 3'])
-            for i in range(num_seeds):
-                j = i*4
-                file_writer.writerow(std_3[j:j+4])
-        with open('output/VCSLAMconfidence_3.csv', mode = 'w') as file:
-            file_writer = csv.writer(file, delimiter = ',')
-            file_writer.writerow(['robot lower', 'robot upper', 'landmark 1 lower', 'landmark 1 upper', 'landmark 2 lower', 'landmark 2 upper', 'landmark 3 lower', 'landmark 3 upper'])
-            for i in range(num_seeds):
-                j = i*8
-                file_writer.writerow(confidence_3[j:j+8])
+        #save the data
+        np.savetxt('output/vcsmc_mse_{}_{}.csv'.format(num_steps,seed), trial_errors, delimiter=',')
+        np.savetxt('output/vcsmc_mean_{}_{}.csv'.format(num_steps,seed), trial_means, delimiter=',')
 
 

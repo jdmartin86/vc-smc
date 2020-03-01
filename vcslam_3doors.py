@@ -66,7 +66,11 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return x + self.target_params[8]
 
     def measurement_model(self, x):
-        return 0.
+        d1 = np.sqrt((self.target_params[2] - x)**2)
+        d2 = np.sqrt((self.target_params[2] - x)**2)
+        d3 = np.sqrt((self.target_params[2] - x)**2)
+        
+        return np.min([d1,d2,d3])
 
     def get_dependency_param_shape(self):
         return [self.num_steps, self.copula_dim]
@@ -82,8 +86,8 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         """
         # Test initialization with prior landmark means
-        marg_params = np.vstack([np.array([np.array([self.prop_scale*self.rs.randn(3*self.state_dim)]).ravel() for t in range(self.num_steps)]),
-                                 np.array([0.0, 2.0, 6.0])])
+        marg_params = np.vstack([np.array([np.array([np.random.normal(loc=0.1, scale=0.001, size=3)]).ravel() for t in range(self.num_steps)]),
+                                 np.array([np.random.normal(0.,2.),np.random.normal(2.,2.),np.random.normal(6.,2.)], dtype=np.float32)])
         return marg_params
 
     def init_dependency_params(self):
@@ -297,7 +301,7 @@ if __name__ == '__main__':
     # Learning rate for the copula
     lr_d = 0.1
     # Number of random seeds for experimental trials
-    num_seeds = 10
+    num_seeds = 100
     # Number of samples to use for plotting
     num_samps = 2000
     # Proposal initial scale
@@ -385,8 +389,8 @@ if __name__ == '__main__':
         trial_mean_errors.append(np.sqrt((truth[num_steps-1,:] - mean_traj)**2))
         trial_map_errors.append(np.sqrt((truth[num_steps-1,:] - map_traj[-1,:])**2))
         trial_means.append(mean_traj)
-        trial_dep_loss.append(np.array(dep_loss))
-        trial_marg_loss.append(np.array(marg_loss))
+        trial_dep_loss.append(np.array(dep_loss).flatten())
+        trial_marg_loss.append(np.array(marg_loss).flatten())
             
         # Print elapsed time for the trial
         end = time.time()
@@ -399,6 +403,6 @@ if __name__ == '__main__':
         np.savetxt('output/vcsmc_rmse_map_{}_{}.csv'.format(num_steps,seed), trial_map_errors, delimiter=',')
         np.savetxt('output/vcsmc_mean_{}_{}.csv'.format(num_steps,seed), trial_means, delimiter=',')
         np.savetxt('output/vcsmc_dep_loss_{}_{}.csv'.format(num_steps,seed), trial_dep_loss, delimiter=',')
-   np.savetxt('output/vcsmc_marg_loss_{}_{}.csv'.format(num_steps,seed), trial_marg_loss, delimiter=',')
+        np.savetxt('output/vcsmc_marg_loss_{}_{}.csv'.format(num_steps,seed), trial_marg_loss, delimiter=',')
 
 

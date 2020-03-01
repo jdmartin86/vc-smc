@@ -84,9 +84,8 @@ class ThreeDoorsGaussianBPFAgent(vcslam_agent.VCSLAMAgent):
         location means (so num landmarks = 3) which we place at the T+1 time step
 
         """
-        # Test initialization with prior landmark means
         marg_params = np.vstack([np.array([np.array([self.prop_scale*self.rs.randn(3*self.state_dim)]).ravel() for t in range(self.num_steps)], dtype=np.float32),
-                                 np.array([0.0, 2.0, 6.0], dtype=np.float32)])
+                                 np.array([np.random.normal(0.,2.),np.random.normal(2.,2.),np.random.normal(6.,2.)], dtype=np.float32)])
         return marg_params
 
     def init_dependency_params(self):
@@ -208,16 +207,8 @@ if __name__ == '__main__':
     num_steps = 3
     # Number of particles to use during training
     num_train_particles = 100
-    # Number of particles to use during SMC query
-    num_query_particles = 2000
-    # Number of iterations to fit the proposal parameters
-    num_train_steps = 4000
-    # Learning rate for the marginal
-    lr_m = 0.1
-    # Learning rate for the copula
-    lr_d = 0.001
     # Number of random seeds for experimental trials
-    num_seeds = 10
+    num_seeds = 100
     # Number of samples to use for plotting
     num_samps = 2000
     # Proposal initial scale
@@ -227,12 +218,12 @@ if __name__ == '__main__':
 
     # True target parameters
     lm1_prior_mean = np.array([[0.]], dtype=np.float32)
+    lm2_prior_mean = np.array([[2.]], dtype=np.float32)
+    lm3_prior_mean = np.array([[6.]], dtype=np.float32)
     lm1_prior_var = np.array([[0.01]], dtype=np.float32)
-    lm2_prior_mean = np.array([[2.0]], dtype=np.float32)
     lm2_prior_var = np.array([[0.01]], dtype=np.float32)
-    lm3_prior_mean = np.array([[6.0]], dtype=np.float32)
     lm3_prior_var = np.array([[0.01]], dtype=np.float32)
-    motion_mean = np.array([[2.0]], dtype=np.float32)
+    motion_mean = np.array([[2.]], dtype=np.float32)
     motion_var = np.array([[0.1]], dtype=np.float32)
     meas_var = np.array([[0.1]], dtype=np.float32)
     init_mean = np.array([[0.]], dtype=np.float32)
@@ -272,9 +263,9 @@ if __name__ == '__main__':
                          vcs_agent = td_agent,
                          observ = zt_vals,
                          num_particles = num_train_particles,
-                         num_train_steps = num_train_steps,
-                         lr_d = lr_d,
-                         lr_m = lr_m,
+                         num_train_steps = 0,
+                         lr_d = 0,
+                         lr_m = 0,
                          summary_writer = writer)
 
             # Initialize the model

@@ -157,7 +157,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             
             return gc.sample(x_prev.get_shape().as_list()[0])
 
-    def log_proposal(self,t,x_curr,x_prev,observ,proposal_params):
+    def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
         """
         Log probability from the state-component copula
         """
@@ -255,7 +255,11 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
     def log_target(self, t, x_curr, x_prev, observ):
-        init_mean, init_var, lm1_prior_mean, lm1_prior_var, lm2_prior_mean, lm2_prior_var, lm3_prior_mean, lm3_prior_var, motion_mean, motion_var, meas_var = self.target_params
+        init_mean, init_var, lm1_prior_mean, \
+        lm1_prior_var, lm2_prior_mean, lm2_prior_var,\
+        lm3_prior_mean, lm3_prior_var, motion_mean,\
+        motion_var, meas_var = self.target_params
+        
         x_prev_samples = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[0]]))
         x_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[0]]))
         l1_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[1]]))
@@ -264,13 +268,24 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         logF = 0.0
         logG = 0.0
-        if t > 0:
-            logF = self.log_normal(x_samples, tf.transpose(self.transition_model(tf.transpose(x_prev_samples))), motion_var)
-        if t == 0 or t == 1:
-            log_mixture_components = [tf.log(1./3.) + self.log_normal(x_samples, l1_samples, meas_var),
-                                      tf.log(1./3.) + self.log_normal(x_samples, l2_samples, meas_var),
-                                      tf.log(1./3.) + self.log_normal(x_samples, l3_samples, meas_var)]
-            logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
+        if t == 0:
+            logF = self.log_normal(x_samples, init_mean, init_var)
+        else:
+            logF = self.log_normal(x_samples,
+                                   tf.transpose(self.transition_model(tf.transpose(x_prev_samples))),
+                                   motion_var)
+        # Measurement model 
+        log_mixture_components = [tf.log(1./3.) + self.log_normal(x_samples,
+                                                                  l1_samples,
+                                                                  meas_var),
+                                  tf.log(1./3.) + self.log_normal(x_samples,
+                                                                  l2_samples,
+                                                                  meas_var),
+                                  tf.log(1./3.) + self.log_normal(x_samples,
+                                                                l3_samples,
+                                                                  meas_var)]
+        logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
+            
         logH = self.log_normal(l1_samples, lm1_prior_mean, lm1_prior_var) + \
                self.log_normal(l2_samples, lm2_prior_mean, lm2_prior_var) + \
                self.log_normal(l3_samples, lm3_prior_mean, lm3_prior_var)
@@ -278,9 +293,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
         target_log = self.log_target(t, x_curr, x_prev, observ)
-        target_log = tf.debugging.check_numerics(target_log, "Target log error")
         prop_log = self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
-        prop_log = tf.debugging.check_numerics(prop_log, "Proposal log error")
         return target_log - prop_log
 
 if __name__ == '__main__':
@@ -291,19 +304,17 @@ if __name__ == '__main__':
     # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 3 # Must be greater than 1
+    num_steps = 4 # Must be greater than 1
     # Number of particles to use during training
-    num_train_particles = 100
+    num_train_particles = 500
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 1000
+    num_train_steps = 500
     # Learning rate for the marginal
     lr_m = 0.1
     # Learning rate for the copula
     lr_d = 0.1
     # Number of random seeds for experimental trials
-    num_seeds = 100
-    # Number of samples to use for plotting
-    num_samps = 2000
+    num_seeds = 1
     # Proposal initial scale
     prop_scale = 2.0
     # Copula initial scale
@@ -336,14 +347,12 @@ if __name__ == '__main__':
                                prop_scale=prop_scale,
                                cop_scale=cop_scale)
 
-    # Generate observations TODO: change to numpy implementation
-    # x_true, z_true = td_agent.generate_data()
-    # xt_vals, zt_vals = sess.run([x_true, z_true])
     zt_vals = None
 
-    truth = np.array([[0, 0, 2, 4],
+    truth = np.array([[0, 0, 2, 6],
                       [2, 0, 2, 6],
-                      [4, 0, 2, 6]], np.int64)
+                      [4, 0, 2, 6],
+                      [6, 0, 2, 6]], np.int64)
     np.savetxt('output/trajectory_ref.txt', truth, delimiter=',')
 
     trial_mean_errors = []; trial_map_errors = []; trial_means = []
@@ -375,12 +384,12 @@ if __name__ == '__main__':
             print("Estimated dep params: {}".format(est_dep_params.flatten()))
 
             # Sample the model
-            particles, map_traj = vcs.sim_q(est_proposal_params,
-                                            target_params,
-                                            zt_vals,
-                                            td_agent,
-                                            num_samples=num_train_particles)
-            particles, map_traj = sess.run([particles, map_traj])
+            particles, map_traj, logw = vcs.sim_q(est_proposal_params,
+                                                  target_params,
+                                                  zt_vals,
+                                                  td_agent,
+                                                  num_samples=num_train_particles)
+            particles, map_traj, logw = sess.run([particles, map_traj, logw])
         particles = np.squeeze(np.array(particles))
         #print('Estimated trajectory samples: {}'.format(particles[-1,:]))
 
@@ -405,4 +414,9 @@ if __name__ == '__main__':
         np.savetxt('output/vcsmc_dep_loss_{}_{}.csv'.format(num_steps,seed), trial_dep_loss, delimiter=',')
         np.savetxt('output/vcsmc_marg_loss_{}_{}.csv'.format(num_steps,seed), trial_marg_loss, delimiter=',')
 
+        np.savetxt('output/vcsmc_weights.csv', np.exp(logw)/np.sum(np.exp(logw)), delimiter=',')
+        for t in range(num_steps):
+            np.savetxt('output/vcsmc_particles_{}.csv'.format(t),
+                       particles[t,:,:],
+                       delimiter=',')
 

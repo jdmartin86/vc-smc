@@ -236,7 +236,7 @@ class VCSLAM():
       # Return a batch of sampled trajectories and the MAP trajectory.
       chosen_trajs = self.get_traj_samples(trajectories, logw_tilde, num_samples)
       map_traj = self.get_map_traj(trajectories, logw_tilde)
-      return chosen_trajs, map_traj
+      return chosen_trajs, map_traj, logw_tilde
 
     def train(self,vcs_agent, verbose=True):
         """

@@ -53,7 +53,12 @@ gc2 = cg.WarpedGaussianCopula(
 gc3 = cg.WarpedGaussianCopula(
     loc=[0., 0.],
     scale_tril=L_mat3,
-    marginal_bijectors=[x_cdf, y_cdf])
+    marginal_bijectors=[y_cdf, x_cdf])
+
+gc4 = cg.WarpedGaussianCopula(
+    loc=[0., 0.],
+    scale_tril=L_mat3,
+    marginal_bijectors=[y_cdf, y_cdf])
 
 # Do TensorFlow
 sess = tf.Session()
@@ -70,6 +75,11 @@ plot2.ax_marg_y.set_ylim([-2,4])
 
 samples3 = gc3.sample(n_samples).eval(session=sess)
 plot3 = sb.jointplot(samples3[:,0], samples3[:,1], kind='kde')
-plot3.ax_marg_x.set_xlim([-1,6])
-plot3.ax_marg_y.set_ylim([-2,4])
+plot3.ax_marg_x.set_xlim([-2,4])
+plot3.ax_marg_y.set_ylim([-1,6])
+
+samples4 = gc4.sample(n_samples).eval(session=sess)
+plot4 = sb.jointplot(samples4[:,0], samples4[:,1], kind='kde')
+plot4.ax_marg_x.set_xlim([-2,4])
+plot4.ax_marg_y.set_ylim([-2,4])
 plt.show()

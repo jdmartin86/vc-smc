@@ -121,7 +121,7 @@ def plot_boxes(data):
 
     plt.show()
 
-def plot_errorbars(data):
+def plot_nl_violins(data):
         
     plt.style.use('ggplot')
     COLOR = 'black'
@@ -136,7 +136,7 @@ def plot_errorbars(data):
     matplotlib.rcParams.update({'font.size': 22})
 
     # Plot the MSE dist for landmarks
-    xlabels = ['BPF({})'.format(l) if i % 2 == 0 else 'VCSMC({})'.format(l) for i,l in enumerate(['x', 'x', r'$\ell_1$',r'$\ell_1$',r'$\ell_2$',r'$\ell_2$',r'$\ell_3$',r'$\ell_3$'])]
+    xlabels = ['BPF(x)', 'VCSMC(x)']
     fig, ax = plt.subplots(figsize=(25, 6))
     ax.yaxis.grid(True, linestyle='-', which='major', color='lightgrey', alpha=0.5)
 
@@ -144,24 +144,39 @@ def plot_errorbars(data):
     ax.set_axisbelow(True)
     ax.set_title('Comparision of Filter MAP Estimates')
     ax.set_ylabel(r'$\sqrt{MSE}$')
+    #ax.set_ylim((-.05,0.8))
     locs, labels = plt.xticks()
     plt.setp(ax, xticks=[y + 1 for y in range(len(xlabels))],
              xticklabels=xlabels)
-    y=[1,2,4,5,7,8,10,11]
-    mean, lower_bound, upper_bound = mean_confidence_interval(data, confidence=0.75)
-    for i in range(np.shape(data)[1]):
 
-        ax.errorbar(mean[i],
-                    y=y[i],
-                    xerr=upper_bound[i],
-                    fmt = 'o',
-                    color = 'k')
+    #    ax.set_xticklabels(methods, fontsize=8)
+    violin_parts = ax.violinplot(data, showmeans=False, showmedians=True)
+    colors = ['cornflowerblue' if i % 2 == 0 else 'tomato' for i in range(len(xlabels))]
+
+    # Make all the violin statistics marks red:
+    for partname in ('cbars','cmins','cmaxes','cmedians'):
+        vp = violin_parts[partname]
+        vp.set_edgecolor('black')
+        vp.set_linewidth(1)
+
+    for i, vp in enumerate(violin_parts['bodies']):
+     vp.set_facecolor(colors[i])
+     vp.set_edgecolor('slategray')
+     vp.set_linewidth(1)
+     vp.set_alpha(0.5)
+
+     
     plt.show()
-
+    
 if __name__ == '__main__':
     # Read data
-    bpf_data = np.genfromtxt('output/bpf_rmse_map_3_10.csv', delimiter=',')
-    vsmc_data = np.genfromtxt('output/vcsmc_rmse_map_3_10.csv', delimiter=',')
+    bpf_data = np.genfromtxt('output/nonlinear/vcsmc_no_rmse_map_10_9.csv', delimiter=',')
+    vsmc_data = np.genfromtxt('output/nonlinear/vcsmc_rmse_map_10_9.csv', delimiter=',')
+
+    plot_nl_violins(np.concatenate([bpf_data[:,None],vsmc_data[:,None]], axis=-1))
+
+    import ipdb; ipdb.set_trace()
+    
     data = []
     x_data = []; l_data = []
     x_data.append(bpf_data[:,0][:,None])
@@ -171,7 +186,7 @@ if __name__ == '__main__':
         dat = np.concatenate(dat, axis=-1)
         #l_data.append(normalize(dat))
         l_data.append(dat)
-        
+    
     x_data = np.concatenate(x_data, axis=-1)
     l_data = np.concatenate(l_data, axis=-1)
 

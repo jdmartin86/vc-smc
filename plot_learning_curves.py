@@ -34,7 +34,7 @@ def smooth_data(data, window=13, order=3, confidence=0.95):
 if __name__ == '__main__':
     # Read data
     #dep_data = np.genfromtxt('output/nonlinear/vcsmc_dep_loss_10_9.csv', delimiter=',')
-    dep_data = np.genfromtxt('output/3door/vcsmc_dep_loss_3_9.csv', delimiter=',')[:,:100]
+    dep_data = np.genfromtxt('output/3door/vcsmc_dep_loss_3_9.csv', delimiter=',')[:,:1000]
     #import ipdb;ipdb.set_trace()
     alpha = 0.5
     plt.style.use('ggplot')
@@ -57,7 +57,7 @@ if __name__ == '__main__':
     ax.set_title('Training Curve (3Doors)')
     ax.set_ylabel(r'Loss')
     ax.set_xlabel('Training Steps')
-    ax.set_xlim((0,100))
+    #ax.set_xlim((0,100))
     mean, lower_bound, upper_bound = smooth_data(dep_data)
     steps = np.linspace(1,len(mean),len(mean))
     ax.plot(steps, mean, label='VCSMC', color='cornflowerblue')

@@ -47,7 +47,7 @@ def plot_violins(data):
 
     # Hide these grid behind plot objects
     ax.set_axisbelow(True)
-    ax.set_title('Comparision of Filter MAP Estimates')
+    ax.set_title('Comparision of Filter Posterior Means Estimates')
     ax.set_ylabel(r'$\sqrt{MSE}$')
     #ax.set_ylim((-.05,0.8))
     locs, labels = plt.xticks()
@@ -70,7 +70,29 @@ def plot_violins(data):
      vp.set_linewidth(1)
      vp.set_alpha(0.5)
 
-     
+     bplot = ax.boxplot(data,
+                        patch_artist=True,
+                        showfliers=True,
+                        widths=0.05)
+     colors = ['cornflowerblue' if i % 2 == 0 else 'tomato' for i in range(len(xlabels))]
+    # fill with colors
+    for patch, color in zip(bplot['boxes'], colors):
+        patch.set_facecolor(color)
+    for patch, color in zip(bplot['whiskers'], colors):
+        plt.setp(patch, color='black')
+    for patch, color in zip(bplot['fliers'], colors):
+        plt.setp(patch, color='black')
+    for patch, color in zip(bplot['means'], colors):
+        plt.setp(patch, color='black')
+    for patch, color in zip(bplot['medians'], colors):
+        plt.setp(patch, color='black')
+    for patch, color in zip(bplot['caps'], colors):
+        plt.setp(patch, color='black')
+    locs, labels = plt.xticks()
+    plt.setp(ax, xticks=[y + 1 for y in range(len(xlabels))],
+             xticklabels=xlabels)
+
+
     plt.show()
 
 def plot_boxes(data):
@@ -94,7 +116,7 @@ def plot_boxes(data):
 
     # Hide these grid behind plot objects
     ax.set_axisbelow(True)
-    ax.set_title('Comparision of Filter MAP Estimates')
+    ax.set_title('Comparision of Filter Posterior Means Estimates')
     ax.set_ylabel(r'$\sqrt{MSE}$')
     locs, labels = plt.xticks()
     plt.setp(ax, xticks=[y + 1 for y in range(len(xlabels))],
@@ -170,12 +192,11 @@ def plot_nl_violins(data):
     
 if __name__ == '__main__':
     # Read data
-    bpf_data = np.genfromtxt('output/nonlinear/vcsmc_no_rmse_map_10_9.csv', delimiter=',')
-    vsmc_data = np.genfromtxt('output/nonlinear/vcsmc_rmse_map_10_9.csv', delimiter=',')
+    bpf_data = np.genfromtxt('output/3door/bpf_rmse_mean_3_99.csv', delimiter=',')
+    vsmc_data = np.genfromtxt('output/3door/vcsmc_rmse_mean_3_99.csv', delimiter=',')
+    #plot_nl_violins(np.concatenate([bpf_data[:,None],vsmc_data[:,None]], axis=-1))
 
-    plot_nl_violins(np.concatenate([bpf_data[:,None],vsmc_data[:,None]], axis=-1))
-
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     
     data = []
     x_data = []; l_data = []

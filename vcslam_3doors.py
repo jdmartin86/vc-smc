@@ -36,7 +36,6 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                  landmark_dim=1,
                  latent_dim=None,
                  observ_dim=1,
-                 rs=np.random.RandomState(0),
                  prop_scale=0.5,
                  cop_scale=0.5):
         # Target model params
@@ -59,18 +58,42 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         self.prop_scale = prop_scale
         self.cop_scale = cop_scale
 
-        # Random state for sampling
-        self.rs = rs
-
     def transition_model(self, x):
-        return x + self.target_params[8]
+        dx = self.target_params[8]
+        return tf.random.normal(shape=x.get_shape(), mean=x + dx, stddev=np.sqrt(self.target_params[9]))
 
-    def measurement_model(self, x):
-        d1 = np.sqrt((self.target_params[2] - x)**2)
-        d2 = np.sqrt((self.target_params[2] - x)**2)
-        d3 = np.sqrt((self.target_params[2] - x)**2)
-        
-        return np.min([d1,d2,d3])
+    def measurement_model(self, x, l=[0.,2.,6.], stddev=0.1):
+        c = np.random.choice([1,2,3])
+        if c == 1:
+            return np.abs(tf.random.normal(shape=x.get_shape(),
+                                           mean=np.abs(x-l[0]),
+                                           stddev=stddev)), 1
+        if c == 2:
+            return np.abs(tf.random.normal(shape=x.get_shape(),
+                                           mean=np.abs(x-l[1]),
+                                           stddev=stddev)), 2
+        return np.abs(tf.random.normal(shape=x.get_shape(),
+                                       mean=np.abs(x-l[2]),
+                                       stddev=stddev)), 3
+
+    def get_observations(self):
+        init_mean, init_var, lm1_prior_mean, \
+        lm1_prior_var, lm2_prior_mean, lm2_prior_var,\
+        lm3_prior_mean, lm3_prior_var, motion_mean,\
+        motion_var, meas_var = self.target_params
+        state = tf.random.normal(shape=[1,1], mean=init_mean, stddev=np.sqrt(init_var))
+        new_obs, landmark = self.measurement_model(state)
+        states = [state]
+        observations = [new_obs]
+        landmarks = [landmark]
+        for _ in range(self.num_steps-1):
+            new_state = self.transition_model(state)
+            new_obs, landmark = self.measurement_model(new_state)
+            states.append(new_state)
+            observations.append(new_obs)
+            landmarks.append(landmark)
+            state = new_state
+        return observations, landmarks, states
 
     def get_dependency_param_shape(self):
         return [self.num_steps, self.copula_dim]
@@ -86,13 +109,19 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         """
         # Test initialization with prior landmark means
-        marg_params = np.vstack([np.array([np.array([np.random.normal(loc=0.1, scale=0.001, size=3)]).ravel() for t in range(self.num_steps)]),
-                                 np.array([np.random.normal(0.,2.),np.random.normal(2.,2.),np.random.normal(6.,2.)], dtype=np.float32)])
+        marg_params = np.vstack([np.array([np.array([np.random.normal(loc=0.+2*t, scale=0.001),
+                                                     np.random.normal(loc=2.+2*t, scale=0.001),
+                                                     np.random.normal(loc=6.+2*t, scale=0.001)],
+                                                    dtype=np.float32).ravel() for t in range(self.num_steps)]),# state means
+                                 np.array([np.random.normal(0.,2.),# landmark #1
+                                           np.random.normal(2.,2.),# landmark #2
+                                           np.random.normal(6.,2.)],# landmark #3
+                                          dtype=np.float32)])
         return marg_params
 
     def init_dependency_params(self):
         # Correlation params
-        copula_params = np.array([np.array(self.cop_scale * self.rs.randn(self.copula_dim)).ravel() for t in range(self.num_steps)])
+        copula_params = np.array([np.array(self.cop_scale * np.random.randn(self.copula_dim)).ravel() for t in range(self.num_steps)])
         return copula_params
 
     def sim_proposal(self, t, x_prev, observ, proposal_params):
@@ -107,34 +136,22 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             prop_copula_params = proposal_params[0]
             prop_marg_params = proposal_params[1]
             
-            mu1t = prop_marg_params[t, 0]
-            mu2t = prop_marg_params[t, 1]
-            mu3t = prop_marg_params[t, 2]
+            mu1 = prop_marg_params[t, 0]
+            mu2 = prop_marg_params[t, 1]
+            mu3 = prop_marg_params[t, 2]
 
             l1m = prop_marg_params[self.num_steps, 0]
             l2m = prop_marg_params[self.num_steps, 1]
             l3m = prop_marg_params[self.num_steps, 2]
             
             ps = np.array([1./3., 1./3., 1./3.], dtype=np.float32)
+            x_scale = np.float32(np.sqrt(0.1))
+            l_scale = np.float32(np.sqrt(0.1))
 
-            if t == 0:
-                mu1 = mu1t
-                mu2 = mu2t
-                mu3 = mu3t
-                x_scale = np.float32(np.squeeze(np.sqrt(init_var)))
-            else:
-                transition = tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
-                mu1 = mu1t + transition
-                mu2 = mu2t + transition
-                mu3 = mu3t + transition
-
-                ps = np.repeat(ps[None,:], num_particles, axis=0)
-
-                mu1 = mu1[:,0]
-                mu2 = mu2[:,0]
-                mu3 = mu3[:,0]
-
-                x_scale = np.float32(np.squeeze(np.sqrt(motion_var)))
+            if t > 0:
+                mu1 = tf.cast(mu1 + 2., dtype=np.float32)
+                mu2 = tf.cast(mu2 + 2., dtype=np.float32)
+                mu3 = tf.cast(mu3 + 2., dtype=np.float32)            
 
             r_vec = prop_copula_params[t,:]
             L_mat = cc.CorrelationCholesky().forward(r_vec)
@@ -144,17 +161,15 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
                                              locs=[mu1, mu2, mu3],
                                              scales=[x_scale, x_scale, x_scale])
 
-            l1_cdf = cg.NormalCDF(loc=l1m, scale=np.sqrt(np.float32(lm1_prior_var)))
-            l2_cdf = cg.NormalCDF(loc=l2m, scale=np.sqrt(np.float32(lm2_prior_var)))
-            l3_cdf = cg.NormalCDF(loc=l3m, scale=np.sqrt(np.float32(lm3_prior_var)))
+            l1_cdf = cg.NormalCDF(loc=l1m, scale=l_scale)
+            l2_cdf = cg.NormalCDF(loc=l2m, scale=l_scale)
+            l3_cdf = cg.NormalCDF(loc=l3m, scale=l_scale)
 
-            # Build a copula (can also store globally if we want)
-            #NOTE: I add tf.eye(3) to L_mat because I think the diagonal has to be > 0
             gc = cg.WarpedGaussianCopula(
                 loc=[0., 0., 0., 0.],
                 scale_tril=L_mat,
                 marginal_bijectors=[x_cdf, l1_cdf, l2_cdf, l3_cdf])
-            
+            #import ipdb; ipdb.set_trace()
             return gc.sample(x_prev.get_shape().as_list()[0])
 
     def log_proposal(self, t, x_curr, x_prev, observ, proposal_params):
@@ -163,32 +178,29 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         """
         prop_copula_params, prop_marg_params = proposal_params
 
-        init_mean, init_var, lm1_prior_mean, \
-        lm1_prior_var, lm2_prior_mean, lm2_prior_var, \
-        lm3_prior_mean, lm3_prior_var, motion_mean, \
-        motion_var, meas_var = self.target_params
-
         T = self.num_steps
         num_particles = x_prev.get_shape().as_list()[0]
         prop_copula_params = proposal_params[0]
         prop_marg_params = proposal_params[1]
 
-        mu1t = prop_marg_params[t,0]
-        mu2t = prop_marg_params[t,1]
-        mu3t = prop_marg_params[t,2]
+        mu1 = prop_marg_params[t,0]
+        mu2 = prop_marg_params[t,1]
+        mu3 = prop_marg_params[t,2]
 
         l1m = prop_marg_params[T,0]
         l2m = prop_marg_params[T,1]
         l3m = prop_marg_params[T,2]
 
-        if t == 0:
-            mu1 = mu1t
-            mu2 = mu2t
-            mu3 = mu3t
+        # Mixture weights
+        ps = np.float32([1./3., 1./3., 1./3.])
+        x_scales = np.float32([np.sqrt(0.1, dtype=np.float32) for _ in range(3)])
+
         if t > 0:
-            mu1 = mu1t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
-            mu2 = mu2t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
-            mu3 = mu3t + tf.transpose(self.transition_model(tf.transpose(x_prev[:,0])))
+            mu1 = tf.cast(mu1 + 2., dtype=np.float32)
+            mu2 = tf.cast(mu2 + 2., dtype=np.float32)
+            mu3 = tf.cast(mu3 + 2., dtype=np.float32)            
+        locs = [mu1, mu2, mu3]
+        x_cdf = cg.EmpGaussianMixtureCDF(ps=ps, locs=locs, scales=x_scales)
 
         # Copula params are defined over the reals, but we want a correlation matrix
         # So we use a sigmoid map to take reals to the range [-1,1]
@@ -197,37 +209,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         r_vec = prop_copula_params[t,:]
         L_mat = cc.CorrelationCholesky().forward(r_vec)
 
-        # Marginal bijectors will be the CDFs of the univariate marginals Here
-        # these are normal CDFs and GaussianMixtureCDF
-        # x_cdf = cg.GaussianMixtureCDF(ps=[1.], locs=[mu1, mu2, mu3], scales=[tf.sqrt(motion_var), tf.sqrt(motion_var), tf.sqrt(motion_var)])
-
-        # ps = tf.transpose(tf.constant([[1./3.], [1./3.], [1./3.]]))
-        ps = [1./3., 1./3., 1./3.]
-        # ps = [0.25, 0.25, 0.25, 0.25]
-        # ps = [1.0]
-        # ps = tf.Print(ps, [ps], "P values")
-
-        if t == 0:
-            # x_scale = tf.sqrt(4.0*meas_var)
-            x_scale = tf.sqrt(init_var)
-        if t > 0:
-            x_scale = tf.sqrt(motion_var)
-
-        if t == 0:
-            ps = [1./3., 1./3., 1./3.]
-        if t > 0:
-            ps = tf.constant([1./3., 1./3., 1./3.])*tf.ones_like(mu1)
-            mu1 = mu1[:,0]
-            mu2 = mu2[:,0]
-            mu3 = mu3[:,0]
-
-        x_cdf = cg.EmpGaussianMixtureCDF(ps=ps,
-                                         locs=[mu1, mu2, mu3],
-                                         scales=[x_scale[0,0], x_scale[0,0], x_scale[0,0]])
-
-        l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(lm1_prior_var))
-        l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(lm2_prior_var))
-        l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(lm3_prior_var))
+        # Landmark marginals
+        l1_cdf = cg.NormalCDF(loc=l1m, scale=tf.sqrt(0.1))
+        l2_cdf = cg.NormalCDF(loc=l2m, scale=tf.sqrt(0.1))
+        l3_cdf = cg.NormalCDF(loc=l3m, scale=tf.sqrt(0.1))
 
         # Build a copula (can also store globally if we want) we would just
         #  have to modify self.copula.scale_tril and
@@ -235,12 +220,8 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         #  tf.eye(3) to L_mat because I think the diagonal has to be > 0
         gc = cg.WarpedGaussianCopula(
             loc=[0., 0., 0., 0.],
-            scale_tril=L_mat, # TODO This is currently just eye(3), use L_mat!
-            marginal_bijectors=[
-                x_cdf,
-                l1_cdf,
-                l2_cdf,
-                l3_cdf])
+            scale_tril=L_mat,
+            marginal_bijectors=[x_cdf, l1_cdf, l2_cdf, l3_cdf])
 
         return gc.log_prob(x_curr)
 
@@ -254,41 +235,75 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         ls_term = -0.5*tf.reduce_sum(first_term*second_term,1)
         return tf.cast(log_norm, dtype=tf.float32) + tf.cast(ls_term, dtype=tf.float32)
 
-    def log_target(self, t, x_curr, x_prev, observ):
+    def log_target(self, t, x_curr, x_prev, observation):
+        """
+        This function computes the log probability of the target distribution. 
+        """
         init_mean, init_var, lm1_prior_mean, \
         lm1_prior_var, lm2_prior_mean, lm2_prior_var,\
         lm3_prior_mean, lm3_prior_var, motion_mean,\
         motion_var, meas_var = self.target_params
         
-        x_prev_samples = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[0]]))
-        x_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[0]]))
-        l1_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[1]]))
-        l2_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[2]]))
-        l3_samples = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[3]]))
+        state = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[0]]))
+        landmark_1 = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[1]]))
+        landmark_2 = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[2]]))
+        landmark_3 = tf.transpose(tf.gather_nd(tf.transpose(x_prev),[[3]]))
+
+        new_state = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[0]]))
+        new_landmark_1 = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[1]]))
+        new_landmark_2 = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[2]]))
+        new_landmark_3 = tf.transpose(tf.gather_nd(tf.transpose(x_curr),[[3]]))
 
         logF = 0.0
         logG = 0.0
+
+        # Measurement model
         if t == 0:
-            logF = self.log_normal(x_samples, init_mean, init_var)
+            # Landmark probabilities are independent Gaussian on the current belief (Maybe update belief)?
+            # log P(l_{1:3})
+            logH = self.log_normal(landmark_1, lm1_prior_mean, lm1_prior_var) + \
+                   self.log_normal(landmark_2, lm2_prior_mean, lm2_prior_var) + \
+                   self.log_normal(landmark_3, lm3_prior_mean, lm3_prior_var)
+
+            # log P(s0)
+            logF = self.log_normal(state, init_mean, init_var)
+
+            # log P(z0 | s0, l_{1:3})
+            log_mixture_components = [tf.log(1./3.) + self.log_normal(observation[t],
+                                                                      np.abs(landmark_1 - state),
+                                                                      meas_var),
+                                      tf.log(1./3.) + self.log_normal(observation[t],
+                                                                      np.abs(landmark_2 - state),
+                                                                      meas_var),
+                                      tf.log(1./3.) + self.log_normal(observation[t],
+                                                                      np.abs(landmark_3 - state),
+                                                                      meas_var)]
+            logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
+
         else:
-            logF = self.log_normal(x_samples,
-                                   tf.transpose(self.transition_model(tf.transpose(x_prev_samples))),
+            # Landmark probabilities are independent Gaussian on the current belief (Maybe update belief)?
+            # log P(l_{1:3})
+            logH = self.log_normal(new_landmark_1, lm1_prior_mean, lm1_prior_var) + \
+                   self.log_normal(new_landmark_2, lm2_prior_mean, lm2_prior_var) + \
+                   self.log_normal(new_landmark_3, lm3_prior_mean, lm3_prior_var)
+
+            # log P(s' | s)
+            logF = self.log_normal(new_state,
+                                   state + motion_mean,
                                    motion_var)
-        # Measurement model 
-        log_mixture_components = [tf.log(1./3.) + self.log_normal(x_samples,
-                                                                  l1_samples,
-                                                                  meas_var),
-                                  tf.log(1./3.) + self.log_normal(x_samples,
-                                                                  l2_samples,
-                                                                  meas_var),
-                                  tf.log(1./3.) + self.log_normal(x_samples,
-                                                                l3_samples,
-                                                                  meas_var)]
-        logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
             
-        logH = self.log_normal(l1_samples, lm1_prior_mean, lm1_prior_var) + \
-               self.log_normal(l2_samples, lm2_prior_mean, lm2_prior_var) + \
-               self.log_normal(l3_samples, lm3_prior_mean, lm3_prior_var)
+            # log P(z' | s', l_{1:3})
+            log_mixture_components = [tf.log(1./3.) + self.log_normal(observation[t],
+                                                                      np.abs(landmark_1 - new_state),
+                                                                      meas_var),
+                                      tf.log(1./3.) + self.log_normal(observation[t],
+                                                                      np.abs(landmark_2 - new_state),
+                                                                      meas_var),
+                                      tf.log(1./3.) + self.log_normal(observation[t],
+                                                                      np.abs(landmark_3 - new_state),
+                                                                      meas_var)]
+            logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
+
         return logF + logG + logH
 
     def log_weights(self, t, x_curr, x_prev, observ, proposal_params):
@@ -297,22 +312,17 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         return target_log - prop_log
 
 if __name__ == '__main__':
-    # List available devices
-    # local_device_protos = device_lib.list_local_devices()
-    # print([x.name for x in local_device_protos])
-    # Optionally use accelerated computation
-    # with tf.device("/device:XLA_CPU:0"):
 
     # Number of steps for the trajectory
-    num_steps = 4 # Must be greater than 1
+    num_steps = 2 # Must be greater than 1
     # Number of particles to use during training
-    num_train_particles = 500
+    num_train_particles = 10
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 500
+    num_train_steps = 0
     # Learning rate for the marginal
-    lr_m = 0.1
+    lr_m = 1.e-2
     # Learning rate for the copula
-    lr_d = 0.1
+    lr_d = 1.e-2
     # Number of random seeds for experimental trials
     num_seeds = 1
     # Proposal initial scale
@@ -324,14 +334,14 @@ if __name__ == '__main__':
     lm1_prior_mean = np.array([[0.]], dtype=np.float32)
     lm2_prior_mean = np.array([[2.]], dtype=np.float32)
     lm3_prior_mean = np.array([[6.]], dtype=np.float32)
-    lm1_prior_var = np.array([[0.01]], dtype=np.float32)
-    lm2_prior_var = np.array([[0.01]], dtype=np.float32)
-    lm3_prior_var = np.array([[0.01]], dtype=np.float32)
+    lm1_prior_var = np.array([[0.1]], dtype=np.float32)
+    lm2_prior_var = np.array([[0.1]], dtype=np.float32)
+    lm3_prior_var = np.array([[0.1]], dtype=np.float32)
     motion_mean = np.array([[2.]], dtype=np.float32)
     motion_var = np.array([[0.1]], dtype=np.float32)
     meas_var = np.array([[0.1]], dtype=np.float32)
     init_mean = np.array([[0.]], dtype=np.float32)
-    init_var = np.array([[5.]], dtype=np.float32)
+    init_var = np.array([[0.1]], dtype=np.float32)
     target_params = [init_mean, init_var,
                      lm1_prior_mean, lm1_prior_var,
                      lm2_prior_mean, lm2_prior_var,
@@ -340,20 +350,42 @@ if __name__ == '__main__':
                      meas_var]
 
     # Create the agent
-    rs = np.random.RandomState(1)# This remains fixed for the ground truth
     td_agent = ThreeDoorsAgent(target_params=target_params,
-                               rs=rs,
                                num_steps=num_steps,
                                prop_scale=prop_scale,
                                cop_scale=cop_scale)
 
-    zt_vals = None
+    # Generate observations
+    observ, landmarks, states = td_agent.get_observations()
+    with tf.Session() as sess:
+        observ, states = sess.run([observ, states])
+    states = np.array(np.squeeze(states))
 
-    truth = np.array([[0, 0, 2, 6],
-                      [2, 0, 2, 6],
-                      [4, 0, 2, 6],
-                      [6, 0, 2, 6]], np.int64)
-    np.savetxt('output/trajectory_ref.txt', truth, delimiter=',')
+    # Reference observations
+    if True:
+        states = np.array([-0.4351809,  1.6902565,  4.002844],
+                          dtype=np.float32)
+        landmarks = [1,2,1]
+        o1 = np.array([[0.29190797]], dtype=np.float32)
+        o2 = np.array([[0.4014704]], dtype=np.float32)
+        o3 = np.array([[4.1063337]], dtype=np.float32)
+        observ = [o1,o2,o3]
+
+    print("States: {}".format(states))
+    print("Observations: {}".format(observ))
+    print("Landmarks: {}".format(landmarks))
+
+    np.savetxt('output/observations.csv',
+               np.array([o.flatten() for _,o in enumerate(observ)]))
+    np.savetxt('output/states.csv',
+               states,
+               delimiter=',')
+
+    truth = []
+    for _, s in enumerate(states):
+        truth.append(np.array([s, 0, 2, 6], dtype=np.float32))
+    truth = np.array(truth)               
+    np.savetxt('output/trajectory_ref.csv', truth, delimiter=',')
 
     trial_mean_errors = []; trial_map_errors = []; trial_means = []
     trial_dep_loss = []; trial_marg_loss = []
@@ -361,12 +393,13 @@ if __name__ == '__main__':
         start = time.time()
         tf.reset_default_graph()
         tf.set_random_seed(seed)
+        np.random.seed(seed)
 
         with tf.Session() as sess:
             writer = tf.summary.FileWriter('./logs', sess.graph)
             vcs = VCSLAM(sess = sess,
                          vcs_agent = td_agent,
-                         observ = zt_vals,
+                         observ = observ,
                          num_particles = num_train_particles,
                          num_train_steps = num_train_steps,
                          lr_d = lr_d,
@@ -386,15 +419,15 @@ if __name__ == '__main__':
             # Sample the model
             particles, map_traj, logw = vcs.sim_q(est_proposal_params,
                                                   target_params,
-                                                  zt_vals,
+                                                  observ,
                                                   td_agent,
                                                   num_samples=num_train_particles)
             particles, map_traj, logw = sess.run([particles, map_traj, logw])
         particles = np.squeeze(np.array(particles))
-        #print('Estimated trajectory samples: {}'.format(particles[-1,:]))
+        print('Estimated trajectory samples: {}'.format(particles))
 
         # record trial data
-        mean_traj = np.mean(particles[-1,:,:], 0)
+        mean_traj = np.mean(particles[num_steps-1,:,:], 0)
         trial_mean_errors.append(np.sqrt((truth[num_steps-1,:] - mean_traj)**2))
         trial_map_errors.append(np.sqrt((truth[num_steps-1,:] - map_traj[-1,:])**2))
         trial_means.append(mean_traj)
@@ -414,6 +447,8 @@ if __name__ == '__main__':
         np.savetxt('output/vcsmc_dep_loss_{}_{}.csv'.format(num_steps,seed), trial_dep_loss, delimiter=',')
         np.savetxt('output/vcsmc_marg_loss_{}_{}.csv'.format(num_steps,seed), trial_marg_loss, delimiter=',')
 
+        print("lowg: {}".format(logw))
+        print("Probs: {}".format(np.exp(logw)/np.sum(np.exp(logw))))
         np.savetxt('output/vcsmc_weights.csv', np.exp(logw)/np.sum(np.exp(logw)), delimiter=',')
         for t in range(num_steps):
             np.savetxt('output/vcsmc_particles_{}.csv'.format(t),

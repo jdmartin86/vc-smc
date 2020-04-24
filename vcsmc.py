@@ -105,9 +105,9 @@ class VCSLAM():
             \mathbb{E}_{\phi}\left[\nabla_\lambda \log \hat p(y_{1:T}) \right]
 
         """
-        # Initialize SMC
+        # Initialize SMC (POOR INIT! SHOULD BE SAMPLING FROM THE PRIOR)
         x_curr = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
-        x_prev = tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim))
+        x_prev = vcs_agent.sim_proposal(0,tf.zeros(dtype=tf.float32,shape=(self.num_particles,self.latent_dim)), self.observ, proposal_params)
 
         # Unnormalized particle weights
         logw_tilde = tf.zeros(dtype=tf.float32,shape=(self.num_particles))
@@ -126,8 +126,6 @@ class VCSLAM():
             if t > 0:
                 ancestors = self.resampling(logw_tilde)
                 x_prev = tf.gather(x_curr,ancestors,axis=0)
-            else:
-                x_prev = x_curr
 
             # Propagation
             # This simulates one transition from the proposal distribution
@@ -190,8 +188,9 @@ class VCSLAM():
       """
       # Initialize SMC
       x_curr = tf.zeros([self.num_particles, self.latent_dim])
-      x_prev = tf.zeros([self.num_particles, self.latent_dim])
-
+      #x_prev = 
+      x_prev = vcs_obj.sim_proposal(0, tf.zeros([self.num_particles, self.latent_dim], dtype=tf.float32), self.observ, prop_params)
+      
       # Unnormalized particle weights
       logw_tilde = tf.zeros(self.num_particles)
 
@@ -201,16 +200,11 @@ class VCSLAM():
 
       trajectories = []
       for t in range(self.num_steps):
-        # Append trajectory elements
-        trajectories.append(x_curr)
-
         # Resampling
         # Shape of x_prev (num_particles,latent_dim)
         if t > 0:
           ancestors = self.resampling(logw_tilde, self.num_particles)
           x_prev = tf.gather(x_curr,ancestors,axis=0)
-        else:
-          x_prev = x_curr
 
         # Propagation
         # This simulates one transition from the proposal distribution
@@ -230,13 +224,19 @@ class VCSLAM():
         #w = tf.nn.softmax(logits=logw_tilde_adj)
         #ESS = 1./tf.reduce_sum(w**2)/self.num_particles
 
+        # Append trajectory elements
+        trajectories.append(x_prev)
+
+        #with tf.Session() as sess:
+        #    print(sess.run([x_prev]))
+        #    print(sess.run([logw_tilde]))
       # Stack trajectories into a tensor.
       trajectories = tf.stack(trajectories)
 
       # Return a batch of sampled trajectories and the MAP trajectory.
-      chosen_trajs = self.get_traj_samples(trajectories, logw_tilde, num_samples)
+      #chosen_trajs = self.get_traj_samples(trajectories, logw_tilde, num_samples)
       map_traj = self.get_map_traj(trajectories, logw_tilde)
-      return chosen_trajs, map_traj, logw_tilde
+      return trajectories, map_traj, logw_tilde
 
     def train(self,vcs_agent, verbose=True):
         """
@@ -261,8 +261,6 @@ class VCSLAM():
 
             # Compute losses and define the learning procedures
             loss = -self.vsmc_lower_bound(vcs_agent, proposal_params)
-            #loss_summary = tf.summary.scalar(name='elbo', tensor=tf.squeeze(loss))
-            #summary_op = tf.summary.merge_all()
 
             learn_dependency = self.optimizer(learning_rate=self.lr_d).minimize(loss, var_list=dependency_params)
             learn_marginal = self.optimizer(learning_rate=self.lr_m).minimize(loss, var_list=marginal_params)

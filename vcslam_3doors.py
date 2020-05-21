@@ -109,6 +109,7 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
         """
         # Test initialization with prior landmark means
+        # TODO how to initialize marg params when num components > 3?
         marg_params = np.vstack([np.array([np.array([np.random.normal(loc=0.+2*t, scale=0.001),
                                                      np.random.normal(loc=2.+2*t, scale=0.001),
                                                      np.random.normal(loc=6.+2*t, scale=0.001)],
@@ -140,6 +141,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             mu2 = prop_marg_params[t, 1]
             mu3 = prop_marg_params[t, 2]
 
+            # mus = []
+            # for i in range(n_components):
+            #     mus.append(prop_marg_params[t, i]
+
             l1m = prop_marg_params[self.num_steps, 0]
             l2m = prop_marg_params[self.num_steps, 1]
             l3m = prop_marg_params[self.num_steps, 2]
@@ -149,6 +154,8 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             l_scale = np.float32(np.sqrt(0.1))
 
             if t > 0:
+                # for i in range(n_components):
+                #     mus[i] = tf.cast(mus[i] + 2., dtype=np.float32)
                 mu1 = tf.cast(mu1 + 2., dtype=np.float32)
                 mu2 = tf.cast(mu2 + 2., dtype=np.float32)
                 mu3 = tf.cast(mu3 + 2., dtype=np.float32)            
@@ -187,6 +194,10 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         mu2 = prop_marg_params[t,1]
         mu3 = prop_marg_params[t,2]
 
+        # mus = []
+        # for i in range(n_components):
+        #     mus.append(prop_marg_params[t, i]
+
         l1m = prop_marg_params[T,0]
         l2m = prop_marg_params[T,1]
         l3m = prop_marg_params[T,2]
@@ -196,10 +207,14 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         x_scales = np.float32([np.sqrt(0.1, dtype=np.float32) for _ in range(3)])
 
         if t > 0:
+            # for i in range(n_components):
+            #     mus[i] = tf.cast(mus[i] + 2., dtype=np.float32)
+
             mu1 = tf.cast(mu1 + 2., dtype=np.float32)
             mu2 = tf.cast(mu2 + 2., dtype=np.float32)
             mu3 = tf.cast(mu3 + 2., dtype=np.float32)            
         locs = [mu1, mu2, mu3]
+        # locs = mus
         x_cdf = cg.EmpGaussianMixtureCDF(ps=ps, locs=locs, scales=x_scales)
 
         # Copula params are defined over the reals, but we want a correlation matrix

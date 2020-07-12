@@ -39,7 +39,7 @@ def plot_dist(data):
     plt.show()
     
 if __name__ == '__main__':
-    time_step = 2
+    time_step = 0
     # Read data
     data = np.genfromtxt('output/vcsmc_particles_{}.csv'.format(time_step),
                          delimiter=',')

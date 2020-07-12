@@ -23,7 +23,6 @@ import metrics
 
 import time
 
-
 # Remove warnings
 tf.logging.set_verbosity(tf.logging.ERROR)
 
@@ -270,13 +269,13 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
 
             # log P(z0 | s0, l_{1:3})
             log_mixture_components = [tf.log(1./3.) + self.log_normal(observation[t],
-                                                                      np.abs(landmark_1 - state),
+                                                                      landmark_1 - state,
                                                                       meas_var),
                                       tf.log(1./3.) + self.log_normal(observation[t],
-                                                                      np.abs(landmark_2 - state),
+                                                                      landmark_2 - state,
                                                                       meas_var),
                                       tf.log(1./3.) + self.log_normal(observation[t],
-                                                                      np.abs(landmark_3 - state),
+                                                                      landmark_3 - state,
                                                                       meas_var)]
             logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
 
@@ -294,13 +293,13 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
             
             # log P(z' | s', l_{1:3})
             log_mixture_components = [tf.log(1./3.) + self.log_normal(observation[t],
-                                                                      np.abs(landmark_1 - new_state),
+                                                                      landmark_1 - new_state,
                                                                       meas_var),
                                       tf.log(1./3.) + self.log_normal(observation[t],
-                                                                      np.abs(landmark_2 - new_state),
+                                                                      landmark_2 - new_state,
                                                                       meas_var),
                                       tf.log(1./3.) + self.log_normal(observation[t],
-                                                                      np.abs(landmark_3 - new_state),
+                                                                      landmark_3 - new_state,
                                                                       meas_var)]
             logG = tf.reduce_logsumexp(log_mixture_components, axis=0)
 
@@ -310,21 +309,42 @@ class ThreeDoorsAgent(vcslam_agent.VCSLAMAgent):
         target_log = self.log_target(t, x_curr, x_prev, observ)
         prop_log = self.log_proposal(t, x_curr, x_prev, observ, proposal_params)
         return target_log - prop_log
+    
+
+def kldiv(X, Q):
+  # read the reference parameters
+  locs = np.genfromtxt('output/3door/ref/loc3.csv', delimiter=',')
+  vars = np.genfromtxt('output/3door/ref/var3.csv', delimiter=',')
+
+  d = 0.
+  for x, q in zip(X,Q):
+    p = 0.
+    # Compute P(x) as a sum of all the modes.
+    for l, v in zip(locs, vars):
+      p += sps.norm(l, np.sqrt(v)).pdf(x)
+
+    # Clip for numerical stability.
+    p = np.clip(p, 1.e-10, 1.)
+    q = np.clip(q, 1.e-10, 1.)
+
+    # Accumulate the divergence at each support point.
+    d += p*np.log(p) - p*np.log(q)
+  return d
 
 if __name__ == '__main__':
 
     # Number of steps for the trajectory
-    num_steps = 2 # Must be greater than 1
+    num_steps = 3 # Must be greater than 1
     # Number of particles to use during training
-    num_train_particles = 10
+    num_train_particles = 100
     # Number of iterations to fit the proposal parameters
-    num_train_steps = 0
+    num_train_steps = 1000
     # Learning rate for the marginal
     lr_m = 1.e-2
     # Learning rate for the copula
     lr_d = 1.e-2
     # Number of random seeds for experimental trials
-    num_seeds = 1
+    num_seeds = 100
     # Proposal initial scale
     prop_scale = 2.0
     # Copula initial scale
@@ -388,7 +408,7 @@ if __name__ == '__main__':
     np.savetxt('output/trajectory_ref.csv', truth, delimiter=',')
 
     trial_mean_errors = []; trial_map_errors = []; trial_means = []
-    trial_dep_loss = []; trial_marg_loss = []
+    trial_dep_loss = []; trial_marg_loss = []; trial_kl = []
     for seed in range(num_seeds):
         start = time.time()
         tf.reset_default_graph()
@@ -440,18 +460,23 @@ if __name__ == '__main__':
         print("Trial #{}: Elapsed time {}, Graph nodes {}".format(seed,
                                                                   end - start,
                                                                   len(graph_vars)))
-        #save the data
-        np.savetxt('output/vcsmc_rmse_mean_{}_{}.csv'.format(num_steps,seed), trial_mean_errors, delimiter=',')
-        np.savetxt('output/vcsmc_rmse_map_{}_{}.csv'.format(num_steps,seed), trial_map_errors, delimiter=',')
-        np.savetxt('output/vcsmc_mean_{}_{}.csv'.format(num_steps,seed), trial_means, delimiter=',')
-        np.savetxt('output/vcsmc_dep_loss_{}_{}.csv'.format(num_steps,seed), trial_dep_loss, delimiter=',')
-        np.savetxt('output/vcsmc_marg_loss_{}_{}.csv'.format(num_steps,seed), trial_marg_loss, delimiter=',')
 
         print("lowg: {}".format(logw))
         print("Probs: {}".format(np.exp(logw)/np.sum(np.exp(logw))))
-        np.savetxt('output/vcsmc_weights.csv', np.exp(logw)/np.sum(np.exp(logw)), delimiter=',')
+        probs = np.exp(logw)/np.sum(np.exp(logw))
+        np.savetxt('output/vcsmc_weights.csv', probs, delimiter=',')
         for t in range(num_steps):
             np.savetxt('output/vcsmc_particles_{}.csv'.format(t),
                        particles[t,:,:],
                        delimiter=',')
 
+        # KL evaluation
+        trial_kl.append(kldiv(particles[num_steps-1,0,:], probs))
+
+        # Save the trial data frequently
+        np.savetxt('output/vcsmc_rmse_mean_{}_{}.csv'.format(num_steps,seed), trial_mean_errors, delimiter=',')
+        np.savetxt('output/vcsmc_rmse_map_{}_{}.csv'.format(num_steps,seed), trial_map_errors, delimiter=',')
+        np.savetxt('output/vcsmc_mean_{}_{}.csv'.format(num_steps,seed), trial_means, delimiter=',')
+        np.savetxt('output/vcsmc_dep_loss_{}_{}.csv'.format(num_steps,seed), trial_dep_loss, delimiter=',')
+        np.savetxt('output/vcsmc_marg_loss_{}_{}.csv'.format(num_steps,seed), trial_marg_loss, delimiter=',')
+        np.savetxt('output/vcsmc_kl_{}_{}.csv'.format(num_steps,seed), trial_kl, delimiter=',')
